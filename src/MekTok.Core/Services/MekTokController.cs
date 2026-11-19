@@ -1,15 +1,12 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.IO;
-using System.Windows;
-using MekTok.App.Native;
-using MekTok.App.UI;
 using MekTok.Core.Audio;
 using MekTok.Core.Config;
 using MekTok.Core.Keyboard;
 using MekTok.Core.Packs;
+using MekTok.Core.Platform;
 
-namespace MekTok.App.Services;
+namespace MekTok.Core.Services;
 
 public sealed record ProfileChoiceItem(
     string Id,
@@ -23,18 +20,19 @@ public sealed record ProfileChoiceItem(
 }
 
 /// <summary>
-/// Central coordinator connecting Raw Input capture, smart pausing, sound resolution,
-/// WASAPI low-latency playback, settings persistence, and UI state notifications.
+/// Cross-platform central coordinator connecting global keyboard input capture, smart auto-pausing,
+/// sound resolution, low-latency audio mixing, settings persistence, and UI state notifications.
 /// </summary>
 public sealed class MekTokController : IDisposable
 {
     private readonly SettingsStore _settingsStore;
     private readonly SoundResolver _soundResolver;
-    private readonly WasapiAudioEngine _audioEngine;
-    private readonly RawInputKeyboardService _rawInput;
-    private readonly GlobalHotkeyService _hotkeyService;
-    private readonly ActiveWindowMonitor _windowMonitor;
-    private readonly WindowsThemeService _themeService;
+    private readonly IAudioOutputEngine _audioEngine;
+    private readonly IGlobalKeyboardService _keyboardService;
+    private readonly IGlobalHotkeyService _hotkeyService;
+    private readonly IActiveWindowMonitor _windowMonitor;
+    private readonly IStartupManager _startupManager;
+    private readonly Action<Action> _dispatchToUi;
     private readonly KeyRepeatFilter _repeatFilter = new();
     private readonly object _saveSync = new();
     private readonly object _chordSync = new();
@@ -49,30 +47,42 @@ public sealed class MekTokController : IDisposable
     private volatile bool _isConfiguratorVisible;
     private bool _disposed;
 
-    public MekTokController()
+    public MekTokController(
+        SettingsStore settingsStore,
+        IAudioOutputEngine audioEngine,
+        IGlobalKeyboardService keyboardService,
+        IGlobalHotkeyService hotkeyService,
+        IActiveWindowMonitor windowMonitor,
+        IStartupManager startupManager,
+        Action<Action>? dispatchToUi = null)
     {
-        _settingsStore = new SettingsStore();
-        Settings = _settingsStore.Load();
+        _settingsStore = settingsStore ?? throw new ArgumentNullException(nameof(settingsStore));
+        _audioEngine = audioEngine ?? throw new ArgumentNullException(nameof(audioEngine));
+        _keyboardService = keyboardService ?? throw new ArgumentNullException(nameof(keyboardService));
+        _hotkeyService = hotkeyService ?? throw new ArgumentNullException(nameof(hotkeyService));
+        _windowMonitor = windowMonitor ?? throw new ArgumentNullException(nameof(windowMonitor));
+        _startupManager = startupManager ?? throw new ArgumentNullException(nameof(startupManager));
+        _dispatchToUi = dispatchToUi ?? (action => action());
 
+        Settings = _settingsStore.Load();
         _soundResolver = new SoundResolver();
-        _audioEngine = new WasapiAudioEngine();
-        _rawInput = new RawInputKeyboardService();
-        _hotkeyService = new GlobalHotkeyService(_rawInput);
-        _windowMonitor = new ActiveWindowMonitor();
-        _themeService = new WindowsThemeService();
 
         InitializeEngine();
     }
 
     public AppSettings Settings { get; }
     public SettingsStore Store => _settingsStore;
-    public WindowsThemeService ThemeService => _themeService;
+    public KeyboardAudioMixer Mixer => _audioEngine.Mixer;
 
     public bool IsEffectivelyActive => Settings.IsEnabled && !_windowMonitor.IsAutoPaused;
     public bool IsAutoPaused => _windowMonitor.IsAutoPaused;
     public string? AutoPauseReason => _windowMonitor.AutoPauseReason;
     public string ActiveAudioDeviceName => _audioEngine.ActiveDeviceName;
     public bool HasActiveAudioOutput => _audioEngine.HasActiveOutput;
+    public double? AudioLatencyMs => _audioEngine.EstimatedLatencyMs;
+    public bool SupportsPerDeviceKeyboardFiltering => _keyboardService.SupportsPerDeviceFiltering;
+    public string? KeyboardPermissionNotice => _keyboardService.PermissionNotice;
+    public bool IsActiveWindowMonitorSupported => _windowMonitor.IsSupported;
     public string? LastHotkeyError { get; private set; }
 
     public event EventHandler? StateChanged;
@@ -104,39 +114,50 @@ public sealed class MekTokController : IDisposable
 
         ReloadComboAudioClips();
 
-        _audioEngine.DevicesChanged += (_, _) => AudioDevicesChanged?.Invoke(this, EventArgs.Empty);
-        _audioEngine.ActiveDeviceChanged += (_, _) => StateChanged?.Invoke(this, EventArgs.Empty);
+        _audioEngine.DevicesChanged += OnAudioDevicesChanged;
+        _audioEngine.ActiveDeviceChanged += OnAudioActiveDeviceChanged;
 
-        _rawInput.KeyEvent += OnRawKeyInput;
-        _rawInput.KeyboardsChanged += (_, _) => KeyboardsChanged?.Invoke(this, EventArgs.Empty);
+        _keyboardService.KeyEvent += OnRawKeyInput;
+        _keyboardService.KeyboardsChanged += OnServiceKeyboardsChanged;
+        _keyboardService.Start();
 
-        _hotkeyService.HotkeyPressed += (_, _) =>
-        {
-            Application.Current?.Dispatcher.BeginInvoke(() => ToggleEnabled());
-        };
+        _hotkeyService.HotkeyPressed += OnGlobalHotkeyPressed;
         (_, LastHotkeyError) = _hotkeyService.ApplyHotkey(Settings.MuteHotkey);
 
-        _windowMonitor.AutoPauseStateChanged += (_, _) =>
-        {
-            _repeatFilter.Reset();
-            lock (_chordSync)
-            {
-                _currentlyPressedScanCodes.Clear();
-                _triggeredCombos.Clear();
-                _comboSuppressedScanCodes.Clear();
-            }
-            StateChanged?.Invoke(this, EventArgs.Empty);
-        };
+        _windowMonitor.AutoPauseStateChanged += OnAutoPauseStateChanged;
         _windowMonitor.UpdateRules(Settings.ExcludedProcessNames, Settings.MuteInFullscreen);
 
-        // Sync startup registry state with saved preference cleanly.
-        if (Settings.StartWithWindows != StartupManager.IsEnabled())
+        // Sync startup state with saved preference cleanly.
+        bool startupEnabled = _startupManager.IsEnabled();
+        if (Settings.StartWithWindows != startupEnabled)
         {
-            Settings.StartWithWindows = StartupManager.IsEnabled();
+            Settings.StartWithWindows = startupEnabled;
         }
     }
 
-    public void ApplyInitialTheme() => _themeService.ApplyTheme(Settings.Theme);
+    private void OnAudioDevicesChanged(object? sender, EventArgs e) =>
+        AudioDevicesChanged?.Invoke(this, EventArgs.Empty);
+
+    private void OnAudioActiveDeviceChanged(object? sender, EventArgs e) =>
+        StateChanged?.Invoke(this, EventArgs.Empty);
+
+    private void OnServiceKeyboardsChanged(object? sender, EventArgs e) =>
+        KeyboardsChanged?.Invoke(this, EventArgs.Empty);
+
+    private void OnGlobalHotkeyPressed(object? sender, EventArgs e) =>
+        _dispatchToUi(ToggleEnabled);
+
+    private void OnAutoPauseStateChanged(object? sender, EventArgs e)
+    {
+        _repeatFilter.Reset();
+        lock (_chordSync)
+        {
+            _currentlyPressedScanCodes.Clear();
+            _triggeredCombos.Clear();
+            _comboSuppressedScanCodes.Clear();
+        }
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
 
     public void NotifyConfiguratorVisibility(bool visible)
     {
@@ -166,7 +187,7 @@ public sealed class MekTokController : IDisposable
     }
 
     /// <summary>
-    /// Cleans verbose Windows WASAPI endpoint strings into natural user-friendly labels.
+    /// Cleans verbose OS audio endpoint strings into natural user-friendly labels.
     /// </summary>
     public static string FormatFriendlyAudioDeviceName(string? rawName, bool isDefaultPrefix = false)
     {
@@ -215,7 +236,9 @@ public sealed class MekTokController : IDisposable
 
     public IReadOnlyList<AudioOutputDeviceInfo> GetOutputDevices() => _audioEngine.ListOutputDevices();
 
-    public IReadOnlyList<KeyboardDeviceInfo> GetConnectedKeyboards() => _rawInput.GetConnectedKeyboards();
+    public IReadOnlyList<KeyboardDeviceInfo> GetConnectedKeyboards() => _keyboardService.GetConnectedKeyboards();
+
+    public IReadOnlyList<string> GetRunningUserProcesses() => _windowMonitor.GetRunningUserProcesses();
 
     public void ToggleEnabled() => SetEnabled(!Settings.IsEnabled);
 
@@ -345,7 +368,7 @@ public sealed class MekTokController : IDisposable
 
     public string CopyCustomAudioToStore(string sourcePath)
     {
-        // Decode first to validate file format and size before copying into AppData.
+        // Decode first to validate file format and size before copying into user storage.
         _ = AudioLoader.LoadClip(sourcePath);
 
         _settingsStore.EnsureDirectories();
@@ -472,6 +495,7 @@ public sealed class MekTokController : IDisposable
     public (bool Success, string? ErrorMessage) SetMuteHotkey(HotkeyConfig newConfig)
     {
         HotkeyConfig previous = Settings.MuteHotkey;
+        newConfig.Normalize();
         Settings.MuteHotkey = newConfig;
         (bool ok, string? err) = _hotkeyService.ApplyHotkey(newConfig);
         if (!ok)
@@ -540,11 +564,13 @@ public sealed class MekTokController : IDisposable
 
     public void SetStartWithWindows(bool enabled)
     {
-        StartupManager.SetEnabled(enabled);
+        _startupManager.SetEnabled(enabled);
         Settings.StartWithWindows = enabled;
         SaveDebounced();
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    public void SetStartOnLogin(bool enabled) => SetStartWithWindows(enabled);
 
     public void SetHideNumpad(bool hide)
     {
@@ -556,20 +582,42 @@ public sealed class MekTokController : IDisposable
     public void SetTheme(ThemePreference theme)
     {
         Settings.Theme = theme;
-        _themeService.ApplyTheme(theme);
         SaveDebounced();
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    public void OpenDataDirectoryInExplorer()
+    public void OpenDataDirectory()
     {
         _settingsStore.EnsureDirectories();
-        Process.Start(new ProcessStartInfo
+        if (OperatingSystem.IsWindows())
         {
-            FileName = _settingsStore.RootDirectory,
-            UseShellExecute = true
-        });
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = _settingsStore.RootDirectory,
+                UseShellExecute = true
+            });
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "open",
+                ArgumentList = { _settingsStore.RootDirectory },
+                UseShellExecute = false
+            });
+        }
+        else
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "xdg-open",
+                ArgumentList = { _settingsStore.RootDirectory },
+                UseShellExecute = false
+            });
+        }
     }
+
+    public void OpenDataDirectoryInExplorer() => OpenDataDirectory();
 
     private void OnRawKeyInput(RawKeyInputEvent ev)
     {
@@ -580,8 +628,7 @@ public sealed class MekTokController : IDisposable
 
         if (_isConfiguratorVisible)
         {
-            Application.Current?.Dispatcher.BeginInvoke(
-                () => KeyActivityObserved?.Invoke(ev.CanonicalScanCode, ev.IsKeyUp));
+            _dispatchToUi(() => KeyActivityObserved?.Invoke(ev.CanonicalScanCode, ev.IsKeyUp));
         }
 
         bool suppressSwitchSound = false;
@@ -798,6 +845,7 @@ public sealed class MekTokController : IDisposable
             _saveDebounceCts?.Cancel();
             var cts = new CancellationTokenSource();
             _saveDebounceCts = cts;
+
             _ = Task.Run(async () =>
             {
                 try
@@ -829,7 +877,7 @@ public sealed class MekTokController : IDisposable
         return string.IsNullOrWhiteSpace(cleaned) ? "custom" : cleaned[..Math.Min(cleaned.Length, 32)];
     }
 
-    public static bool RunHeadlessSelfTest(out string summary)
+    public static bool RunCoreSelfTest(out string summary)
     {
         string tempRoot = Path.Combine(Path.GetTempPath(), "MekTok_SelfTest_" + Guid.NewGuid().ToString("N"));
         try
@@ -851,37 +899,6 @@ public sealed class MekTokController : IDisposable
                 bankCount++;
             }
 
-            using var audioEngine = new WasapiAudioEngine();
-            IReadOnlyList<AudioOutputDeviceInfo> devices = audioEngine.ListOutputDevices();
-
-            using var rawInput = new RawInputKeyboardService();
-            IReadOnlyList<KeyboardDeviceInfo> keyboards = rawInput.GetConnectedKeyboards();
-
-            using var activeIcon = IconFactory.CreateTrayIcon(active: true);
-            using var mutedIcon = IconFactory.CreateTrayIcon(active: false);
-            if (activeIcon.Width <= 0 || mutedIcon.Width <= 0)
-            {
-                throw new InvalidOperationException("Tray icon generation failed.");
-            }
-
-            _ = new ResourceDictionary
-            {
-                Source = new Uri("pack://application:,,,/Themes/FluentDark.xaml", UriKind.Absolute)
-            };
-            _ = new ResourceDictionary
-            {
-                Source = new Uri("pack://application:,,,/Themes/FluentLight.xaml", UriKind.Absolute)
-            };
-            _ = new ResourceDictionary
-            {
-                Source = new Uri("pack://application:,,,/Themes/Controls.xaml", UriKind.Absolute)
-            };
-            var visualKeyboard = new VisualKeyboardControl();
-            if (visualKeyboard.KeyCanvas.Children.Count != Ansi104Layout.AllKeys.Count)
-            {
-                throw new InvalidOperationException("Visual keyboard failed to render all 104 ANSI keys.");
-            }
-
             var sampleChoice = new ProfileChoiceItem(
                 BuiltInProfiles.MxRedId,
                 "MX Red — Light Linear",
@@ -894,14 +911,12 @@ public sealed class MekTokController : IDisposable
                 throw new InvalidOperationException("ProfileChoiceItem.ToString leaked internal record metadata.");
             }
 
-            summary =
-                $"MekTok self-test passed: {bankCount} switch banks synthesized, " +
-                $"{devices.Count} audio output(s), {keyboards.Count} keyboard(s), XAML themes & 104-key UI OK.";
+            summary = $"Core OK ({bankCount} switch banks synthesized)";
             return true;
         }
         catch (Exception ex)
         {
-            summary = $"MekTok self-test failed: {ex.Message}";
+            summary = $"Core self-test failed: {ex.Message}";
             return false;
         }
         finally
@@ -928,11 +943,17 @@ public sealed class MekTokController : IDisposable
         _synthDebounceCts?.Cancel();
         SaveImmediate();
 
-        _rawInput.KeyEvent -= OnRawKeyInput;
+        _audioEngine.DevicesChanged -= OnAudioDevicesChanged;
+        _audioEngine.ActiveDeviceChanged -= OnAudioActiveDeviceChanged;
+        _keyboardService.KeyEvent -= OnRawKeyInput;
+        _keyboardService.KeyboardsChanged -= OnServiceKeyboardsChanged;
+        _hotkeyService.HotkeyPressed -= OnGlobalHotkeyPressed;
+        _windowMonitor.AutoPauseStateChanged -= OnAutoPauseStateChanged;
+
         _windowMonitor.Dispose();
         _hotkeyService.Dispose();
-        _rawInput.Dispose();
+        _keyboardService.Dispose();
         _audioEngine.Dispose();
-        _themeService.Dispose();
     }
 }
+

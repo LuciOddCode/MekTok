@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Threading;
 using MekTok.Core.Config;
+using MekTok.Core.Platform;
 
 namespace MekTok.App.Native;
 
@@ -11,7 +12,7 @@ namespace MekTok.App.Native;
 /// Tracks foreground window process and fullscreen state using WinEventHook + periodic fullscreen check
 /// so the keystroke hot path reads pre-computed volatile booleans with zero Win32 calls.
 /// </summary>
-public sealed class ActiveWindowMonitor : IDisposable
+public sealed class ActiveWindowMonitor : IActiveWindowMonitor
 {
     private static readonly HashSet<string> DesktopShellClasses = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -52,6 +53,7 @@ public sealed class ActiveWindowMonitor : IDisposable
         _pollTimer.Start();
     }
 
+    public bool IsSupported => true;
     public bool IsAutoPaused => _isAutoPaused;
     public string? AutoPauseReason => _autoPauseReason;
 
@@ -65,6 +67,8 @@ public sealed class ActiveWindowMonitor : IDisposable
         _muteInFullscreen = muteInFullscreen;
         EvaluateCurrentWindow();
     }
+
+    IReadOnlyList<string> IActiveWindowMonitor.GetRunningUserProcesses() => GetRunningUserProcesses();
 
     public static IReadOnlyList<string> GetRunningUserProcesses()
     {

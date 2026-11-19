@@ -7,13 +7,19 @@ namespace MekTok.Core.Packs;
 
 /// <summary>
 /// Imports and loads Mechvibes sound packs (both single-sprite and multi-file config.json formats)
-/// with strict path-traversal and size-limit checks.
+/// with strict path-traversal, Windows-separator normalization, case-insensitive lookup fallback, and size-limit checks.
 /// </summary>
 public static class MechvibesPackImporter
 {
     private const long MaxZipEntryBytes = AudioLoader.DefaultMaxFileBytes;
     private const long MaxZipTotalBytes = 250L * 1024 * 1024;
     private const int MaxSpriteDurationMs = 180_000;
+
+    private static StringComparison PathComparison =>
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+    private static StringComparer PathComparer =>
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
     public static async Task<ImportedSoundPack> ImportFromFolderAsync(
         string sourceFolder,
@@ -30,7 +36,7 @@ public static class MechvibesPackImporter
             ?? throw new FileNotFoundException("No config.json found in the selected sound pack folder.");
         string configDir = Path.GetDirectoryName(configPath)!;
 
-        // Validate config and load clips from source before copying into AppData.
+        // Validate config and load clips from source before copying into user storage.
         ImportedSoundPack validated = await Task.Run(
             () => LoadPackFromDirectory(configDir, idOverride: null),
             cancellationToken);
@@ -70,9 +76,11 @@ public static class MechvibesPackImporter
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    if (string.IsNullOrEmpty(entry.Name))
+                    if (string.IsNullOrEmpty(entry.Name) ||
+                        entry.FullName.EndsWith('/') ||
+                        entry.FullName.EndsWith('\\'))
                     {
-                        continue; // Directory entry
+                        continue; // Directory entry (handles both '/' and Windows '\')
                     }
 
                     if (entry.Length > MaxZipEntryBytes)
@@ -88,8 +96,9 @@ public static class MechvibesPackImporter
                             "Archive exceeds maximum allowed extracted pack size (250 MB).");
                     }
 
-                    string destPath = Path.GetFullPath(Path.Combine(stagingDir, entry.FullName));
-                    if (!destPath.StartsWith(normalizedStagingRoot, StringComparison.OrdinalIgnoreCase))
+                    string safeRelative = NormalizeAndValidateRelativePath(entry.FullName, "archive entry path");
+                    string destPath = Path.GetFullPath(Path.Combine(stagingDir, safeRelative));
+                    if (!destPath.StartsWith(normalizedStagingRoot, PathComparison))
                     {
                         throw new InvalidOperationException(
                             $"Blocked unsafe archive entry path: '{entry.FullName}'.");
@@ -143,10 +152,10 @@ public static class MechvibesPackImporter
     public static ImportedSoundPack LoadPackFromDirectory(string packDirectory, string? idOverride = null)
     {
         string normalizedPackRoot = EnsureTrailingSeparator(Path.GetFullPath(packDirectory));
-        string configPath = Path.Combine(packDirectory, "config.json");
-        if (!File.Exists(configPath))
+        string? configPath = FindDirectConfigFile(packDirectory);
+        if (configPath is null || !File.Exists(configPath))
         {
-            throw new FileNotFoundException("Mechvibes config.json not found.", configPath);
+            throw new FileNotFoundException("Mechvibes config.json not found.", Path.Combine(packDirectory, "config.json"));
         }
 
         using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(configPath));
@@ -237,7 +246,7 @@ public static class MechvibesPackImporter
         }
         else if (defineType == "multi")
         {
-            var clipCache = new Dictionary<string, AudioClip>(StringComparer.OrdinalIgnoreCase);
+            var clipCache = new Dictionary<string, AudioClip>(PathComparer);
 
             foreach (JsonProperty entry in definesProp.EnumerateObject())
             {
@@ -327,30 +336,139 @@ public static class MechvibesPackImporter
         return startMs >= 0 && durationMs > 0;
     }
 
+    private static string NormalizeAndValidateRelativePath(string rawRelativePath, string contextLabel)
+    {
+        string slashNormalized = rawRelativePath.Trim().Replace('\\', '/');
+        if (string.IsNullOrWhiteSpace(slashNormalized) ||
+            slashNormalized.StartsWith('/') ||
+            (slashNormalized.Length >= 2 && char.IsLetter(slashNormalized[0]) && slashNormalized[1] == ':'))
+        {
+            throw new InvalidOperationException($"Blocked unsafe {contextLabel}: '{rawRelativePath}'.");
+        }
+
+        return slashNormalized.Replace('/', Path.DirectorySeparatorChar);
+    }
+
     private static string ResolveSafeChildPath(
         string normalizedPackRoot,
         string packDirectory,
         string relativePath)
     {
-        string combined = Path.GetFullPath(Path.Combine(packDirectory, relativePath));
-        if (!combined.StartsWith(normalizedPackRoot, StringComparison.OrdinalIgnoreCase))
+        string osRelative = NormalizeAndValidateRelativePath(relativePath, "file path outside pack directory");
+        string combined = Path.GetFullPath(Path.Combine(packDirectory, osRelative));
+        if (!combined.StartsWith(normalizedPackRoot, PathComparison))
         {
             throw new InvalidOperationException(
                 $"Blocked unsafe file path outside pack directory: '{relativePath}'.");
         }
-        return combined;
+
+        if (File.Exists(combined))
+        {
+            return combined;
+        }
+
+        // Windows-authored packs often differ in filename/folder casing on Linux.
+        // Walk segments safely with case-insensitive matching while staying pinned inside normalizedPackRoot.
+        string[] segments = relativePath.Trim()
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        string currentPath = Path.GetFullPath(packDirectory);
+        for (int i = 0; i < segments.Length; i++)
+        {
+            string seg = segments[i];
+            if (seg == ".")
+            {
+                continue;
+            }
+
+            if (seg == "..")
+            {
+                string? parent = Directory.GetParent(currentPath)?.FullName;
+                if (string.IsNullOrEmpty(parent))
+                {
+                    return combined;
+                }
+
+                currentPath = parent;
+                string currentWithSep = EnsureTrailingSeparator(currentPath);
+                if (!currentWithSep.StartsWith(normalizedPackRoot, PathComparison))
+                {
+                    throw new InvalidOperationException(
+                        $"Blocked unsafe file path outside pack directory: '{relativePath}'.");
+                }
+                continue;
+            }
+
+            if (!Directory.Exists(currentPath))
+            {
+                return combined;
+            }
+
+            string exactChild = Path.Combine(currentPath, seg);
+            bool isLast = i == segments.Length - 1;
+            if (isLast ? File.Exists(exactChild) : Directory.Exists(exactChild))
+            {
+                currentPath = exactChild;
+                continue;
+            }
+
+            string? matchedChild = null;
+            foreach (string entry in Directory.EnumerateFileSystemEntries(currentPath))
+            {
+                if (string.Equals(Path.GetFileName(entry), seg, StringComparison.OrdinalIgnoreCase))
+                {
+                    matchedChild = entry;
+                    break;
+                }
+            }
+
+            if (matchedChild is null)
+            {
+                return combined;
+            }
+
+            currentPath = matchedChild;
+        }
+
+        string resolved = Path.GetFullPath(currentPath);
+        if (!resolved.StartsWith(normalizedPackRoot, PathComparison))
+        {
+            throw new InvalidOperationException(
+                $"Blocked unsafe file path outside pack directory: '{relativePath}'.");
+        }
+
+        return resolved;
     }
 
     private static string? FindConfigFile(string folder)
     {
-        string direct = Path.Combine(folder, "config.json");
-        if (File.Exists(direct)) return direct;
+        string? direct = FindDirectConfigFile(folder);
+        if (direct is not null) return direct;
 
         foreach (string subDir in Directory.GetDirectories(folder))
         {
-            string nested = Path.Combine(subDir, "config.json");
-            if (File.Exists(nested)) return nested;
+            string? nested = FindDirectConfigFile(subDir);
+            if (nested is not null) return nested;
         }
+        return null;
+    }
+
+    private static string? FindDirectConfigFile(string folder)
+    {
+        string exact = Path.Combine(folder, "config.json");
+        if (File.Exists(exact)) return exact;
+
+        if (!Directory.Exists(folder)) return null;
+
+        foreach (string file in Directory.EnumerateFiles(folder))
+        {
+            if (string.Equals(Path.GetFileName(file), "config.json", StringComparison.OrdinalIgnoreCase))
+            {
+                return file;
+            }
+        }
+
         return null;
     }
 
@@ -416,4 +534,3 @@ public static class MechvibesPackImporter
             ? fullPath
             : fullPath + Path.DirectorySeparatorChar;
 }
-

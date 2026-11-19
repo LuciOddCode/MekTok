@@ -1,0 +1,737 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="clr-namespace:MekTok.Desktop.UI"
+        xmlns:services="clr-namespace:MekTok.Core.Services;assembly=MekTok.Core"
+        x:Class="MekTok.Desktop.UI.MainWindow"
+        Title="MekTok — Mechanical Keyboard Sound Studio"
+        Width="1120"
+        Height="750"
+        MinWidth="900"
+        MinHeight="620"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource TextPrimaryBrush}"
+        Icon="avares://MekTok/Assets/mektok-app.png">
+
+    <Grid ColumnDefinitions="236,*">
+
+        <!-- Left Navigation Rail -->
+        <Border Grid.Column="0"
+                Background="{DynamicResource SurfaceSubtleBrush}"
+                BorderBrush="{DynamicResource BorderSubtleBrush}"
+                BorderThickness="0,0,1,0"
+                Padding="14,18">
+            <Grid RowDefinitions="Auto,*,Auto">
+
+                <!-- App Header & Master Toggle -->
+                <StackPanel Grid.Row="0" Margin="0,0,0,18">
+                    <StackPanel Margin="4,0,4,10">
+                        <TextBlock Text="MekTok"
+                                   FontSize="20"
+                                   FontWeight="Bold"
+                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                        <TextBlock x:Name="SidebarStatusText"
+                                   Text="Active • Creamy Thock"
+                                   FontSize="11.5"
+                                   TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   Margin="0,2,0,0" />
+                    </StackPanel>
+
+                    <Border Background="{DynamicResource SurfaceCardBrush}"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="10,8">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Grid.Column="0"
+                                       Text="Sounds Enabled"
+                                       FontSize="12.5"
+                                       FontWeight="Medium"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <ToggleSwitch x:Name="SidebarMasterToggle"
+                                          Grid.Column="1"
+                                          OnContent=""
+                                          OffContent=""
+                                          Padding="0"
+                                          MinWidth="44"
+                                          IsCheckedChanged="OnMasterToggleChanged" />
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <!-- Nav Items -->
+                <StackPanel Grid.Row="1" Spacing="4">
+                    <RadioButton x:Name="NavConfigurator"
+                                 Classes="nav"
+                                 Content="Key Configurator"
+                                 GroupName="MainNav"
+                                 IsChecked="True"
+                                 IsCheckedChanged="OnNavChanged" />
+                    <RadioButton x:Name="NavAcoustics"
+                                 Classes="nav"
+                                 Content="Acoustics &amp; Packs"
+                                 GroupName="MainNav"
+                                 IsCheckedChanged="OnNavChanged" />
+                    <RadioButton x:Name="NavCombos"
+                                 Classes="nav"
+                                 Content="Key Sound Combos"
+                                 GroupName="MainNav"
+                                 IsCheckedChanged="OnNavChanged" />
+                    <RadioButton x:Name="NavSettings"
+                                 Classes="nav"
+                                 Content="Smart Controls &amp; Settings"
+                                 GroupName="MainNav"
+                                 IsCheckedChanged="OnNavChanged" />
+                </StackPanel>
+
+                <!-- Bottom Device Summary & Tray Button -->
+                <StackPanel Grid.Row="2" Spacing="10">
+                    <Border Background="{DynamicResource SurfaceCardBrush}"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="10,8">
+                        <StackPanel>
+                            <TextBlock Text="ACTIVE OUTPUT"
+                                       FontSize="10"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextMutedBrush}" />
+                            <TextBlock x:Name="SidebarDeviceText"
+                                       Text="Default Speaker"
+                                       FontSize="11.5"
+                                       TextTrimming="CharacterEllipsis"
+                                       Margin="0,2,0,0"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                        </StackPanel>
+                    </Border>
+
+                    <Button Classes="secondary"
+                            Content="Minimize to System Tray"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            Click="OnHideToTrayClick" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Main Content Area -->
+        <Grid Grid.Column="1" Margin="22,18">
+
+            <!-- VIEW 1: KEY CONFIGURATOR -->
+            <ScrollViewer x:Name="ViewConfigurator" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="12">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Interactive Key Sound Configurator"
+                                       FontSize="20"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Click any physical key or choose a key group below to test, mute, swap switch profiles, or assign custom WAV/OGG/MP3 sounds."
+                                       FontSize="12.5"
+                                       TextWrapping="Wrap"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Margin="0,3,0,0" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="12">
+                            <CheckBox x:Name="HideNumpadCheck"
+                                      Content="Hide Numpad (TKL)"
+                                      IsCheckedChanged="OnHideNumpadChanged" />
+                            <Button Classes="secondary"
+                                    Content="Reset Overrides"
+                                    Click="OnResetProfileOverridesClick" />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Profile Bar & Group Selector Pills -->
+                    <Border Classes="card" Padding="12">
+                        <StackPanel Spacing="10">
+                            <Grid ColumnDefinitions="Auto,260,Auto,*,Auto">
+                                <TextBlock Grid.Column="0"
+                                           Text="Editing Profile:"
+                                           VerticalAlignment="Center"
+                                           FontWeight="Medium"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           Margin="0,0,10,0" />
+                                <ComboBox x:Name="ConfigProfileCombo"
+                                          Grid.Column="1"
+                                          HorizontalAlignment="Stretch"
+                                          SelectionChanged="OnConfigProfileComboChanged">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate x:DataType="services:ProfileChoiceItem">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <Ellipse Width="9"
+                                                         Height="9"
+                                                         Fill="{Binding AccentHex, Converter={x:Static ui:HexToBrushConverter.Instance}}"
+                                                         VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding DisplayName}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <Button Grid.Column="2"
+                                        Classes="secondary"
+                                        Content="Test Profile"
+                                        Margin="8,0,0,0"
+                                        Click="OnTestCurrentProfileClick" />
+                                <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="8">
+                                    <Button Classes="secondary"
+                                            Content="Import Pack Folder"
+                                            Click="OnImportPackFolderClick" />
+                                    <Button Classes="secondary"
+                                            Content="Import .zip Pack"
+                                            Click="OnImportPackZipClick" />
+                                </StackPanel>
+                            </Grid>
+
+                            <WrapPanel x:Name="GroupChipsPanel" Orientation="Horizontal" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Interactive Visual Keyboard -->
+                    <ui:VisualKeyboardControl x:Name="VisualKeyboard" />
+
+                    <!-- Legend -->
+                    <StackPanel Orientation="Horizontal" Margin="4,0,0,0" Spacing="16">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse Width="8" Height="8" Fill="{DynamicResource AccentBrush}" VerticalAlignment="Center" />
+                            <TextBlock Text="Per-Key Override" FontSize="11.5" Foreground="{DynamicResource TextMutedBrush}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse Width="8" Height="8" Fill="{DynamicResource SuccessBrush}" VerticalAlignment="Center" />
+                            <TextBlock Text="Group Override" FontSize="11.5" Foreground="{DynamicResource TextMutedBrush}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse Width="8" Height="8" Fill="{DynamicResource DangerBrush}" VerticalAlignment="Center" />
+                            <TextBlock Text="Muted" FontSize="11.5" Foreground="{DynamicResource TextMutedBrush}" />
+                        </StackPanel>
+                        <TextBlock Text="Tip: Typing on any keyboard lights up keys live here."
+                                   FontSize="11.5"
+                                   Foreground="{DynamicResource TextMutedBrush}" />
+                    </StackPanel>
+
+                    <!-- Inspector Card -->
+                    <Border Classes="card">
+                        <StackPanel Spacing="14">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock x:Name="InspectorTitle"
+                                               Text="Select a key or key group"
+                                               FontSize="16"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextPrimaryBrush}" />
+                                    <TextBlock x:Name="InspectorSubtitle"
+                                               Text="Priority: Individual Key -> Key Group -> Base Profile"
+                                               FontSize="12"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                               Margin="0,2,0,0" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                                    <Button Classes="primary"
+                                            Content="Audition Sound"
+                                            Click="OnAuditionSelectedClick" />
+                                    <Button x:Name="ClearOverrideButton"
+                                            Classes="secondary"
+                                            Content="Clear Override"
+                                            Click="OnClearSelectedOverrideClick" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Grid ColumnDefinitions="*,22,*">
+                                <!-- Left Inspector Column -->
+                                <StackPanel Grid.Column="0" Spacing="10">
+                                    <CheckBox x:Name="InspectorMuteCheck"
+                                              Content="Mute sound for this key / group"
+                                              IsCheckedChanged="OnInspectorControlChanged" />
+
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="Switch Sound Override"
+                                                   FontSize="12"
+                                                   FontWeight="Medium"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                                        <ComboBox x:Name="InspectorSwitchCombo"
+                                                  HorizontalAlignment="Stretch"
+                                                  SelectionChanged="OnInspectorControlChanged">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate x:DataType="ui:SwitchOptionItem">
+                                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                                        <Ellipse Width="8"
+                                                                 Height="8"
+                                                                 Fill="{Binding AccentHex, Converter={x:Static ui:HexToBrushConverter.Instance}}"
+                                                                 VerticalAlignment="Center" />
+                                                        <TextBlock Text="{Binding DisplayName}"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   VerticalAlignment="Center" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                    </StackPanel>
+
+                                    <StackPanel>
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0" Text="Volume Multiplier" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                            <TextBlock x:Name="InspectorVolumeText" Grid.Column="1" Text="100%" FontSize="12" FontWeight="SemiBold" />
+                                        </Grid>
+                                        <Slider x:Name="InspectorVolumeSlider"
+                                                Minimum="0"
+                                                Maximum="200"
+                                                Value="100"
+                                                ValueChanged="OnInspectorSliderChanged" />
+                                    </StackPanel>
+
+                                    <StackPanel>
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0" Text="Pitch Offset" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                            <TextBlock x:Name="InspectorPitchText" Grid.Column="1" Text="0.0 st" FontSize="12" FontWeight="SemiBold" />
+                                        </Grid>
+                                        <Slider x:Name="InspectorPitchSlider"
+                                                Minimum="-12"
+                                                Maximum="12"
+                                                Value="0"
+                                                ValueChanged="OnInspectorSliderChanged" />
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <!-- Right Inspector Column -->
+                                <StackPanel Grid.Column="2" Spacing="10">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="Custom Press Audio (.wav, .ogg, .mp3)"
+                                                   FontSize="12"
+                                                   FontWeight="Medium"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                                        <Grid ColumnDefinitions="*,Auto,Auto">
+                                            <TextBox x:Name="InspectorPressFileBox"
+                                                     Grid.Column="0"
+                                                     IsReadOnly="True"
+                                                     Text="(Inherited)" />
+                                            <Button Grid.Column="1"
+                                                    Classes="secondary"
+                                                    Content="Browse..."
+                                                    Margin="6,0,0,0"
+                                                    Click="OnBrowsePressAudioClick" />
+                                            <Button Grid.Column="2"
+                                                    Classes="secondary"
+                                                    Content="Clear"
+                                                    Margin="6,0,0,0"
+                                                    Click="OnClearPressAudioClick" />
+                                        </Grid>
+                                    </StackPanel>
+
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="Custom Release Audio (Optional)"
+                                                   FontSize="12"
+                                                   FontWeight="Medium"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                                        <Grid ColumnDefinitions="*,Auto,Auto">
+                                            <TextBox x:Name="InspectorReleaseFileBox"
+                                                     Grid.Column="0"
+                                                     IsReadOnly="True"
+                                                     Text="(Inherited)" />
+                                            <Button Grid.Column="1"
+                                                    Classes="secondary"
+                                                    Content="Browse..."
+                                                    Margin="6,0,0,0"
+                                                    Click="OnBrowseReleaseAudioClick" />
+                                            <Button Grid.Column="2"
+                                                    Classes="secondary"
+                                                    Content="Clear"
+                                                    Margin="6,0,0,0"
+                                                    Click="OnClearReleaseAudioClick" />
+                                        </Grid>
+                                    </StackPanel>
+
+                                    <Border Background="{DynamicResource SurfaceSubtleBrush}"
+                                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="8"
+                                            Padding="10">
+                                        <TextBlock Text="Custom files are copied safely into your MekTok data library so moving or deleting the original download won't break your key mapping."
+                                                   FontSize="11.5"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextMutedBrush}" />
+                                    </Border>
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- VIEW 2: ACOUSTICS & SOUND PACKS -->
+            <ScrollViewer x:Name="ViewAcoustics" IsVisible="False" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="14">
+                    <StackPanel>
+                        <TextBlock Text="Built-in Switch Profiles &amp; Acoustic Engine"
+                                   FontSize="20"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                        <TextBlock Text="Choose one of the 9 physically-modeled mechanical switches or tune realism parameters in real time."
+                                   FontSize="12.5"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Margin="0,3,0,0" />
+                    </StackPanel>
+
+                    <UniformGrid x:Name="BuiltInSwitchGrid" Columns="3" ColumnSpacing="10" RowSpacing="10" />
+
+                    <!-- Realism Sliders Card -->
+                    <Border Classes="card">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Acoustic Realism Suite"
+                                       FontSize="15.5"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+
+                            <Grid ColumnDefinitions="*,26,*">
+                                <StackPanel Grid.Column="0" Spacing="10">
+                                    <StackPanel>
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0" Text="Master Volume" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                            <TextBlock x:Name="AcMasterVolText" Grid.Column="1" Text="75%" FontSize="12.5" FontWeight="SemiBold" />
+                                        </Grid>
+                                        <Slider x:Name="AcMasterVolSlider" Minimum="0" Maximum="100" ValueChanged="OnAcousticSliderChanged" />
+                                    </StackPanel>
+
+                                    <StackPanel>
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0" Text="Global Pitch Shift" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                            <TextBlock x:Name="AcPitchText" Grid.Column="1" Text="0.0 st" FontSize="12.5" FontWeight="SemiBold" />
+                                        </Grid>
+                                        <Slider x:Name="AcPitchSlider" Minimum="-6" Maximum="6" ValueChanged="OnAcousticSliderChanged" />
+                                    </StackPanel>
+
+                                    <StackPanel>
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0" Text="Thock / Case Body Depth" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                            <TextBlock x:Name="AcThockText" Grid.Column="1" Text="50%" FontSize="12.5" FontWeight="SemiBold" />
+                                        </Grid>
+                                        <Slider x:Name="AcThockSlider" Minimum="0" Maximum="100" ValueChanged="OnAcousticSliderChanged" />
+                                    </StackPanel>
+
+                                    <StackPanel>
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0" Text="Brightness / Clack Snap" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                            <TextBlock x:Name="AcBrightText" Grid.Column="1" Text="50%" FontSize="12.5" FontWeight="SemiBold" />
+                                        </Grid>
+                                        <Slider x:Name="AcBrightSlider" Minimum="0" Maximum="100" ValueChanged="OnAcousticSliderChanged" />
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2" Spacing="8">
+                                    <CheckBox x:Name="AcKeyUpCheck"
+                                              Content="Play softer Key-Up (release) sounds"
+                                              IsCheckedChanged="OnAcousticToggleChanged" />
+
+                                    <StackPanel>
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0" Text="Key-Up Volume" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                            <TextBlock x:Name="AcKeyUpVolText" Grid.Column="1" Text="55%" FontSize="12.5" FontWeight="SemiBold" />
+                                        </Grid>
+                                        <Slider x:Name="AcKeyUpVolSlider" Minimum="0" Maximum="120" ValueChanged="OnAcousticSliderChanged" />
+                                    </StackPanel>
+
+                                    <StackPanel>
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0" Text="Humanization (pitch &amp; dynamics)" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                            <TextBlock x:Name="AcHumanizeText" Grid.Column="1" Text="35%" FontSize="12.5" FontWeight="SemiBold" />
+                                        </Grid>
+                                        <Slider x:Name="AcHumanizeSlider" Minimum="0" Maximum="100" ValueChanged="OnAcousticSliderChanged" />
+                                    </StackPanel>
+
+                                    <CheckBox x:Name="AcStereoPanCheck"
+                                              Content="Subtle left-to-right stereo spatial panning"
+                                              IsCheckedChanged="OnAcousticToggleChanged" />
+
+                                    <StackPanel>
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0" Text="Stereo Pan Width" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                            <TextBlock x:Name="AcPanWidthText" Grid.Column="1" Text="35%" FontSize="12.5" FontWeight="SemiBold" />
+                                        </Grid>
+                                        <Slider x:Name="AcPanWidthSlider" Minimum="0" Maximum="100" ValueChanged="OnAcousticSliderChanged" />
+                                    </StackPanel>
+
+                                    <CheckBox x:Name="AcSuppressRepeatCheck"
+                                              Content="Suppress hold-key auto-repeat clicks"
+                                              IsCheckedChanged="OnAcousticToggleChanged" />
+                                    <CheckBox x:Name="AcEditingRepeatCheck"
+                                              Content="Allow repeat on Backspace, Delete &amp; Arrows"
+                                              IsCheckedChanged="OnAcousticToggleChanged" />
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Imported Mechvibes Sound Packs Card -->
+                    <Border Classes="card">
+                        <StackPanel Spacing="10">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Imported Mechvibes Sound Packs"
+                                               FontSize="15.5"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextPrimaryBrush}" />
+                                    <TextBlock Text="Supports standard single-sprite and multi-file config.json packs (WAV, OGG, MP3)."
+                                               FontSize="12"
+                                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                                    <Button Classes="secondary"
+                                            Content="Import Folder..."
+                                            Click="OnImportPackFolderClick" />
+                                    <Button Classes="primary"
+                                            Content="Import .zip..."
+                                            Click="OnImportPackZipClick" />
+                                </StackPanel>
+                            </Grid>
+
+                            <StackPanel x:Name="ImportedPacksPanel" Spacing="6" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- VIEW 3: SMART CONTROLS & SETTINGS -->
+            <ScrollViewer x:Name="ViewSettings" IsVisible="False" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="14">
+                    <StackPanel>
+                        <TextBlock Text="Smart Controls, Input Devices &amp; Preferences"
+                                   FontSize="20"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                        <TextBlock Text="Manage audio routing, global mute hotkeys, automatic app exclusions, keyboard capture, and login startup."
+                                   FontSize="12.5"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Margin="0,3,0,0" />
+                    </StackPanel>
+
+                    <!-- Audio Output & Hotkey Row -->
+                    <Grid ColumnDefinitions="*,14,*">
+                        <Border Grid.Column="0" Classes="card">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="Audio Playback Device" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="Follow system default automatically or lock MekTok to a specific audio output."
+                                           FontSize="12"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <ComboBox x:Name="SettingsDeviceCombo"
+                                              Grid.Column="0"
+                                              HorizontalAlignment="Stretch"
+                                              SelectionChanged="OnSettingsDeviceChanged">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate x:DataType="ui:OutputDeviceItem">
+                                                <TextBlock Text="{Binding DisplayName}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Center" />
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                    <Button Grid.Column="1"
+                                            Classes="secondary"
+                                            Content="Refresh"
+                                            Margin="8,0,0,0"
+                                            Click="OnRefreshDevicesClick" />
+                                </Grid>
+                                <TextBlock x:Name="AudioLatencyText"
+                                           Text="Audio latency: measuring..."
+                                           FontSize="11.5"
+                                           Foreground="{DynamicResource TextMutedBrush}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="2" Classes="card">
+                            <StackPanel Spacing="8">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBlock Grid.Column="0" Text="Global Mute Hotkey" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    <ToggleSwitch x:Name="HotkeyEnabledCheck"
+                                                  Grid.Column="1"
+                                                  OnContent=""
+                                                  OffContent=""
+                                                  Padding="0"
+                                                  MinWidth="44"
+                                                  IsCheckedChanged="OnHotkeyEnabledChanged" />
+                                </Grid>
+                                <TextBlock Text="Click the box below and press your desired shortcut combination."
+                                           FontSize="12"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBox x:Name="HotkeyCaptureBox"
+                                             Grid.Column="0"
+                                             IsReadOnly="True"
+                                             KeyDown="OnHotkeyCaptureKeyDown"
+                                             GotFocus="OnHotkeyCaptureGotFocus"
+                                             LostFocus="OnHotkeyCaptureLostFocus" />
+                                    <Button Grid.Column="1"
+                                            Classes="secondary"
+                                            Content="Reset"
+                                            Margin="8,0,0,0"
+                                            Click="OnResetHotkeyClick" />
+                                </Grid>
+                                <TextBlock x:Name="HotkeyStatusText"
+                                           Text=""
+                                           FontSize="11.5"
+                                           Foreground="{DynamicResource DangerBrush}" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- Smart Auto-Pause & Keyboard Input Row -->
+                    <Grid ColumnDefinitions="*,14,*">
+                        <Border Grid.Column="0" Classes="card">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="Smart Auto-Pause" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock x:Name="AutoPauseUnsupportedText"
+                                           IsVisible="False"
+                                           FontSize="11.5"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource WarningBrush}"
+                                           Text="Active-window inspection is limited in this desktop session (e.g., native Wayland). Use the global hotkey or tray menu to mute manually." />
+                                <CheckBox x:Name="MuteFullscreenCheck"
+                                          Content="Auto-mute when a fullscreen app or game is focused"
+                                          IsCheckedChanged="OnMuteFullscreenChanged" />
+
+                                <TextBlock Text="Excluded Apps (auto-mute while focused)"
+                                           FontSize="12"
+                                           FontWeight="Medium"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                                <Grid ColumnDefinitions="*,Auto,Auto">
+                                    <ComboBox x:Name="RunningAppsCombo" Grid.Column="0" HorizontalAlignment="Stretch" />
+                                    <Button Grid.Column="1"
+                                            Classes="secondary"
+                                            Content="Refresh"
+                                            Margin="6,0,0,0"
+                                            Click="OnRefreshRunningAppsClick" />
+                                    <Button Grid.Column="2"
+                                            Classes="primary"
+                                            Content="Add App"
+                                            Margin="6,0,0,0"
+                                            Click="OnAddSelectedProcessClick" />
+                                </Grid>
+
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBox x:Name="ManualProcessBox"
+                                             Grid.Column="0"
+                                             PlaceholderText="Enter process name (e.g. code, discord, steam)" />
+                                    <Button Grid.Column="1"
+                                            Classes="secondary"
+                                            Content="Add Name"
+                                            Margin="6,0,0,0"
+                                            Click="OnAddManualProcessClick" />
+                                </Grid>
+
+                                <StackPanel x:Name="ExcludedAppsPanel" Spacing="4" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="2" Classes="card">
+                            <StackPanel Spacing="8">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBlock Grid.Column="0" Text="Keyboard Capture &amp; Devices" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    <Button Grid.Column="1"
+                                            Classes="secondary"
+                                            Content="Refresh"
+                                            Padding="10,4"
+                                            Click="OnRefreshKeyboardsClick" />
+                                </Grid>
+                                <TextBlock x:Name="KeyboardModeDescription"
+                                           Text="All keyboards trigger sounds by default."
+                                           FontSize="12"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                                <Border x:Name="PermissionNoticeBanner"
+                                        IsVisible="False"
+                                        Background="{DynamicResource SurfaceSubtleBrush}"
+                                        BorderBrush="{DynamicResource WarningBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="10">
+                                    <TextBlock x:Name="PermissionNoticeText"
+                                               FontSize="11.5"
+                                               TextWrapping="Wrap"
+                                               Foreground="{DynamicResource WarningBrush}" />
+                                </Border>
+                                <StackPanel x:Name="KeyboardsListPanel" Spacing="4" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- Preferences & Privacy -->
+                    <Border Classes="card">
+                        <Grid ColumnDefinitions="*,26,*">
+                            <StackPanel Grid.Column="0" Spacing="10">
+                                <TextBlock Text="Appearance &amp; Startup" FontSize="15" FontWeight="SemiBold" />
+
+                                <StackPanel Spacing="5">
+                                    <TextBlock Text="Theme" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                    <ComboBox x:Name="ThemeCombo"
+                                              HorizontalAlignment="Stretch"
+                                              SelectionChanged="OnThemeComboChanged">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate x:DataType="ui:ThemeChoiceItem">
+                                                <TextBlock Text="{Binding Label}" VerticalAlignment="Center" />
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                </StackPanel>
+
+                                <CheckBox x:Name="StartWithWindowsCheck"
+                                          Content="Start MekTok automatically on login (minimized to tray)"
+                                          IsCheckedChanged="OnStartupToggleChanged" />
+
+                                <Button Classes="secondary"
+                                        Content="Open MekTok Data Folder"
+                                        HorizontalAlignment="Left"
+                                        Click="OnOpenDataFolderClick" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2" Spacing="8">
+                                <TextBlock Text="Privacy &amp; OS Behavior" FontSize="15" FontWeight="SemiBold" />
+                                <Border Background="{DynamicResource SurfaceSubtleBrush}"
+                                        BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="12">
+                                    <TextBlock x:Name="PrivacyBehaviorText"
+                                               FontSize="12"
+                                               TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                                </Border>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- VIEW 4: CUSTOM KEY COMBINATIONS -->
+            <ScrollViewer x:Name="ViewCombos" IsVisible="False" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="14">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Custom Key Combination Sounds"
+                                       FontSize="20"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Assign custom sound effects (WAV, MP3, OGG) to simultaneous key chords like Shift+Y+! or Ctrl+Alt+W."
+                                       FontSize="12.5"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Margin="0,3,0,0" />
+                        </StackPanel>
+
+                        <Button Grid.Column="1"
+                                Classes="primary"
+                                Content="+ Add New Combo"
+                                VerticalAlignment="Center"
+                                Click="OnAddNewComboClick" />
+                    </Grid>
+
+                    <StackPanel x:Name="CombosListPanel" Spacing="12" />
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</Window>

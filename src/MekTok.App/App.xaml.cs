@@ -2,9 +2,13 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Threading;
-using MekTok.App.Services;
+using MekTok.App.Native;
 using MekTok.App.UI;
+using MekTok.Core.Audio;
 using MekTok.Core.Config;
+using MekTok.Core.Keyboard;
+using MekTok.Core.Platform;
+using MekTok.Core.Services;
 
 namespace MekTok.App;
 
@@ -20,6 +24,7 @@ public partial class App : Application
     private Mutex? _instanceMutex;
     private EventWaitHandle? _showSignalEvent;
     private RegisteredWaitHandle? _signalWaitHandle;
+    private WindowsThemeService? _themeService;
     private MekTokController? _controller;
     private TrayIconManager? _trayManager;
     private TrayFlyoutWindow? _flyoutWindow;
@@ -36,7 +41,7 @@ public partial class App : Application
                 AttachConsole(-1);
             }
 
-            bool ok = MekTokController.RunHeadlessSelfTest(out string summary);
+            bool ok = RunWindowsSelfTest(out string summary);
             Console.WriteLine(summary);
             Environment.ExitCode = ok ? 0 : 1;
             Shutdown(ok ? 0 : 1);
@@ -56,10 +61,20 @@ public partial class App : Application
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
 
-        _controller = new MekTokController();
-        _controller.ApplyInitialTheme();
+        var rawInput = new RawInputKeyboardService();
+        _themeService = new WindowsThemeService();
+        _controller = new MekTokController(
+            new SettingsStore(),
+            new WasapiAudioEngine(),
+            rawInput,
+            new GlobalHotkeyService(rawInput),
+            new ActiveWindowMonitor(),
+            new WindowsStartupManager(),
+            action => Dispatcher.BeginInvoke(action));
 
-        _mainWindow = new MainWindow(_controller);
+        _themeService.ApplyTheme(_controller.Settings.Theme);
+
+        _mainWindow = new MainWindow(_controller, _themeService);
         _flyoutWindow = new TrayFlyoutWindow(_controller);
         _trayManager = new TrayIconManager(_controller);
 
@@ -85,6 +100,59 @@ public partial class App : Application
         if (!startMinimized)
         {
             ShowMainWindow();
+        }
+    }
+
+    private static bool RunWindowsSelfTest(out string summary)
+    {
+        if (!MekTokController.RunCoreSelfTest(out string coreSummary))
+        {
+            summary = coreSummary;
+            return false;
+        }
+
+        try
+        {
+            using var audioEngine = new WasapiAudioEngine();
+            IReadOnlyList<AudioOutputDeviceInfo> devices = audioEngine.ListOutputDevices();
+
+            using var rawInput = new RawInputKeyboardService();
+            IReadOnlyList<KeyboardDeviceInfo> keyboards = rawInput.GetConnectedKeyboards();
+
+            using var activeIcon = IconFactory.CreateTrayIcon(active: true);
+            using var mutedIcon = IconFactory.CreateTrayIcon(active: false);
+            if (activeIcon.Width <= 0 || mutedIcon.Width <= 0)
+            {
+                throw new InvalidOperationException("Tray icon generation failed.");
+            }
+
+            _ = new ResourceDictionary
+            {
+                Source = new Uri("pack://application:,,,/Themes/FluentDark.xaml", UriKind.Absolute)
+            };
+            _ = new ResourceDictionary
+            {
+                Source = new Uri("pack://application:,,,/Themes/FluentLight.xaml", UriKind.Absolute)
+            };
+            _ = new ResourceDictionary
+            {
+                Source = new Uri("pack://application:,,,/Themes/Controls.xaml", UriKind.Absolute)
+            };
+            var visualKeyboard = new VisualKeyboardControl();
+            if (visualKeyboard.KeyCanvas.Children.Count != Ansi104Layout.AllKeys.Count)
+            {
+                throw new InvalidOperationException("Visual keyboard failed to render all 104 ANSI keys.");
+            }
+
+            summary =
+                $"MekTok Windows self-test passed: {coreSummary}, " +
+                $"{devices.Count} audio output(s), {keyboards.Count} keyboard(s), XAML themes & 104-key UI OK.";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            summary = $"MekTok Windows self-test failed: {ex.Message}";
+            return false;
         }
     }
 
@@ -121,6 +189,7 @@ public partial class App : Application
         _trayManager?.Dispose();
         _flyoutWindow?.Close();
         _controller?.Dispose();
+        _themeService?.Dispose();
         _showSignalEvent?.Dispose();
 
         try
@@ -171,4 +240,3 @@ public partial class App : Application
         }
     }
 }
-

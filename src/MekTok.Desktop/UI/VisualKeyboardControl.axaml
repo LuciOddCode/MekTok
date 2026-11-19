@@ -1,0 +1,32 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="MekTok.Desktop.UI.VisualKeyboardControl">
+    <UserControl.Styles>
+        <Style Selector="TextBlock.keycap-label">
+            <Setter Property="Foreground" Value="{DynamicResource KeycapTextBrush}" />
+        </Style>
+        <Style Selector="Ellipse.dot-muted">
+            <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
+        </Style>
+        <Style Selector="Ellipse.dot-key">
+            <Setter Property="Fill" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="Ellipse.dot-group">
+            <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
+        </Style>
+    </UserControl.Styles>
+
+    <Border Background="{DynamicResource SurfaceSubtleBrush}"
+            BorderBrush="{DynamicResource BorderSubtleBrush}"
+            BorderThickness="1"
+            CornerRadius="12"
+            Padding="14">
+        <Viewbox Stretch="Uniform">
+            <Canvas x:Name="KeyCanvas"
+                    Width="1035"
+                    Height="290"
+                    ClipToBounds="False" />
+        </Viewbox>
+    </Border>
+</UserControl>
+

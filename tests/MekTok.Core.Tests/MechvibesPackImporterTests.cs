@@ -119,6 +119,50 @@ public class MechvibesPackImporterTests : IDisposable
             () => MechvibesPackImporter.ImportFromZipAsync(zipPath, packsDir));
     }
 
+    [Fact]
+    public async Task ImportFromFolderAsync_NormalizesBackslashesAndHandlesCaseMismatchOnLinux()
+    {
+        string srcDir = Path.Combine(_tempRoot, "win-authored-pack");
+        string soundsDir = Path.Combine(srcDir, "Sounds");
+        string packsDir = Path.Combine(_tempRoot, "packs-win");
+        Directory.CreateDirectory(soundsDir);
+
+        CreateTestWav(Path.Combine(soundsDir, "Alpha.WAV"), durationMs: 90);
+        File.WriteAllText(
+            Path.Combine(srcDir, "CONFIG.JSON"),
+            """
+            {
+              "name": "Windows Pack",
+              "key_define_type": "multi",
+              "defines": {
+                "30": "sounds\\alpha.wav"
+              }
+            }
+            """);
+
+        ImportedSoundPack pack = await MechvibesPackImporter.ImportFromFolderAsync(srcDir, packsDir);
+
+        Assert.Equal("Windows Pack", pack.Name);
+        Assert.True(pack.PressClips.ContainsKey(0x001E));
+    }
+
+    [Fact]
+    public async Task ImportFromZipAsync_BlocksBackslashZipSlipEntries()
+    {
+        string zipPath = Path.Combine(_tempRoot, "win-zipslip.zip");
+        string packsDir = Path.Combine(_tempRoot, "packs-win-slip");
+
+        using (ZipArchive archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            ZipArchiveEntry entry = archive.CreateEntry(@"..\..\escaped.txt");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write("malicious");
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => MechvibesPackImporter.ImportFromZipAsync(zipPath, packsDir));
+    }
+
     private static void CreateTestWav(string path, int durationMs)
     {
         var format = WaveFormat.CreateIeeeFloatWaveFormat(48000, 1);

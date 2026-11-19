@@ -3,20 +3,17 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Interop;
 using MekTok.Core.Keyboard;
+using MekTok.Core.Platform;
 using Microsoft.Win32;
 
 namespace MekTok.App.Native;
-
-public sealed record KeyboardDeviceInfo(string DeviceId, string DisplayName);
-
-public readonly record struct RawKeyInputEvent(int CanonicalScanCode, bool IsKeyUp, string DeviceId);
 
 /// <summary>
 /// Captures global hardware keyboard events via Win32 Raw Input (RIDEV_INPUTSINK) on a hidden
 /// message-only window so typing latency is never blocked and per-keyboard filtering works cleanly.
 /// Keystrokes are never logged or stored.
 /// </summary>
-public sealed class RawInputKeyboardService : IDisposable
+public sealed class RawInputKeyboardService : IGlobalKeyboardService
 {
     private const string SyntheticDeviceId = "SYNTHETIC_OR_UNKNOWN";
     private const ushort RiKeyBreak = 0x0001;
@@ -26,6 +23,7 @@ public sealed class RawInputKeyboardService : IDisposable
     private readonly uint _headerSize = (uint)Marshal.SizeOf<NativeMethods.RAWINPUTHEADER>();
     private IntPtr _rawBuffer;
     private uint _rawBufferCapacity = 256;
+    private bool _started;
     private bool _disposed;
 
     public RawInputKeyboardService()
@@ -42,16 +40,23 @@ public sealed class RawInputKeyboardService : IDisposable
 
         _hwndSource = new HwndSource(parameters);
         _hwndSource.AddHook(WndProc);
-
-        RegisterForKeyboardInput();
-        RefreshDeviceCache();
     }
 
     public IntPtr WindowHandle => _hwndSource.Handle;
+    public bool SupportsPerDeviceFiltering => true;
+    public string? PermissionNotice => null;
 
     public event Action<RawKeyInputEvent>? KeyEvent;
     public event EventHandler? KeyboardsChanged;
     public event Action<IntPtr, uint, uint>? CustomMessageReceived;
+
+    public void Start()
+    {
+        if (_started || _disposed) return;
+        _started = true;
+        RegisterForKeyboardInput();
+        RefreshDeviceCache();
+    }
 
     private void RegisterForKeyboardInput()
     {

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <OutputType>WinExe</OutputType>
     <UseWPF>true</UseWPF>
@@ -11,7 +11,7 @@
     <AssemblyName>MekTok</AssemblyName>
     <RootNamespace>MekTok.App</RootNamespace>
     <ApplicationIcon>Assets\mektok.ico</ApplicationIcon>
-    <Version>1.0.0</Version>
+    <Version>2.0.0</Version>
     <Product>MekTok</Product>
     <Description>Mechanical keyboard sound simulator for Windows</Description>
   </PropertyGroup>
@@ -19,6 +19,10 @@
   <ItemGroup>
     <Using Remove="System.Windows.Forms" />
     <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio.Wasapi" Version="3.3.0" />
   </ItemGroup>
 
   <ItemGroup>

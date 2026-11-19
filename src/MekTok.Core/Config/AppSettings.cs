@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using MekTok.Core.Audio;
 using MekTok.Core.Keyboard;
 
@@ -11,70 +13,143 @@ public enum ThemePreference
 }
 
 [Flags]
+[JsonConverter(typeof(HotkeyModifiersJsonConverter))]
 public enum HotkeyModifiers : uint
 {
     None = 0,
     Alt = 0x0001,
     Control = 0x0002,
     Shift = 0x0004,
-    Win = 0x0008
+    Meta = 0x0008
+}
+
+public sealed class HotkeyModifiersJsonConverter : JsonConverter<HotkeyModifiers>
+{
+    public override HotkeyModifiers Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Number)
+        {
+            return (HotkeyModifiers)reader.GetUInt32();
+        }
+
+        if (reader.TokenType == JsonTokenType.String)
+        {
+            string? raw = reader.GetString();
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return HotkeyModifiers.None;
+            }
+
+            HotkeyModifiers result = HotkeyModifiers.None;
+            foreach (string part in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (part.Equals("Win", StringComparison.OrdinalIgnoreCase) ||
+                    part.Equals("Meta", StringComparison.OrdinalIgnoreCase) ||
+                    part.Equals("Super", StringComparison.OrdinalIgnoreCase) ||
+                    part.Equals("Cmd", StringComparison.OrdinalIgnoreCase) ||
+                    part.Equals("Command", StringComparison.OrdinalIgnoreCase))
+                {
+                    result |= HotkeyModifiers.Meta;
+                }
+                else if (part.Equals("Ctrl", StringComparison.OrdinalIgnoreCase))
+                {
+                    result |= HotkeyModifiers.Control;
+                }
+                else if (part.Equals("Option", StringComparison.OrdinalIgnoreCase))
+                {
+                    result |= HotkeyModifiers.Alt;
+                }
+                else if (Enum.TryParse<HotkeyModifiers>(part, ignoreCase: true, out HotkeyModifiers parsed))
+                {
+                    result |= parsed;
+                }
+            }
+
+            return result;
+        }
+
+        throw new JsonException($"Unexpected token '{reader.TokenType}' for HotkeyModifiers.");
+    }
+
+    public override void Write(Utf8JsonWriter writer, HotkeyModifiers value, JsonSerializerOptions options)
+    {
+        writer.WriteStringValue(value.ToString());
+    }
 }
 
 public sealed class HotkeyConfig
 {
+    private HotkeyKey _key = HotkeyKey.M;
+    private bool _keyWasExplicitlySet;
+    private int? _legacyVirtualKey;
+
     public bool Enabled { get; set; } = true;
+
+    [JsonConverter(typeof(HotkeyModifiersJsonConverter))]
     public HotkeyModifiers Modifiers { get; set; } = HotkeyModifiers.Control | HotkeyModifiers.Alt;
-    public int VirtualKey { get; set; } = 0x4D; // 'M'
+
+    public HotkeyKey Key
+    {
+        get => _key;
+        set
+        {
+            _key = value;
+            _keyWasExplicitlySet = true;
+        }
+    }
+
+    /// <summary>
+    /// Legacy Win32 VirtualKey kept strictly for migrating existing Windows settings.json files.
+    /// Always cleared during Normalize() so saved settings files remain platform-neutral.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? VirtualKey
+    {
+        get => _legacyVirtualKey;
+        set => _legacyVirtualKey = value;
+    }
+
+    public void Normalize()
+    {
+        if (!_keyWasExplicitlySet && _legacyVirtualKey is int vk && vk > 0)
+        {
+            HotkeyKey migrated = HotkeyKeyExtensions.FromWin32VirtualKey(vk);
+            if (migrated != HotkeyKey.None)
+            {
+                _key = migrated;
+            }
+            else
+            {
+                _key = HotkeyKey.None;
+                Enabled = false;
+            }
+        }
+
+        _legacyVirtualKey = null;
+    }
 
     public string ToDisplayString()
     {
-        if (!Enabled || VirtualKey <= 0)
+        if (!Enabled || Key == HotkeyKey.None)
         {
             return "Disabled";
         }
 
-        var parts = new List<string>(4);
+        var parts = new List<string>(5);
         if (Modifiers.HasFlag(HotkeyModifiers.Control)) parts.Add("Ctrl");
         if (Modifiers.HasFlag(HotkeyModifiers.Alt)) parts.Add("Alt");
         if (Modifiers.HasFlag(HotkeyModifiers.Shift)) parts.Add("Shift");
-        if (Modifiers.HasFlag(HotkeyModifiers.Win)) parts.Add("Win");
-        parts.Add(FormatVirtualKey(VirtualKey));
+        if (Modifiers.HasFlag(HotkeyModifiers.Meta))
+        {
+            parts.Add(OperatingSystem.IsMacOS()
+                ? "Cmd"
+                : OperatingSystem.IsWindows()
+                    ? "Win"
+                    : "Super");
+        }
+        parts.Add(Key.ToDisplayString());
         return string.Join("+", parts);
     }
-
-    private static string FormatVirtualKey(int vk) => vk switch
-    {
-        >= 0x41 and <= 0x5A => ((char)vk).ToString(),
-        >= 0x30 and <= 0x39 => ((char)vk).ToString(),
-        >= 0x70 and <= 0x87 => $"F{vk - 0x70 + 1}",
-        0x20 => "Space",
-        0x1B => "Esc",
-        0x0D => "Enter",
-        0x08 => "Backspace",
-        0x09 => "Tab",
-        0x2D => "Insert",
-        0x2E => "Delete",
-        0x24 => "Home",
-        0x23 => "End",
-        0x21 => "PgUp",
-        0x22 => "PgDn",
-        0x25 => "Left",
-        0x26 => "Up",
-        0x27 => "Right",
-        0x28 => "Down",
-        0xC0 => "`",
-        0xBD => "-",
-        0xBB => "=",
-        0xDB => "[",
-        0xDD => "]",
-        0xDC => "\\",
-        0xBA => ";",
-        0xDE => "'",
-        0xBC => ",",
-        0xBE => ".",
-        0xBF => "/",
-        _ => $"VK_{vk:X2}"
-    };
 }
 
 public sealed class AcousticSettings
@@ -225,6 +300,7 @@ public sealed class AppSettings
         Acoustics.Normalize();
 
         MuteHotkey ??= new HotkeyConfig();
+        MuteHotkey.Normalize();
 
         ExcludedProcessNames = (ExcludedProcessNames ?? [])
             .Where(s => !string.IsNullOrWhiteSpace(s))
@@ -266,4 +342,3 @@ public sealed class AppSettings
         return trimmed.ToLowerInvariant();
     }
 }
-

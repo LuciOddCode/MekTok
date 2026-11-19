@@ -58,12 +58,12 @@ public class KeyboardAudioMixerTests
         mixer.Trigger(new ResolvedKeySound(clip, Volume: 1.0f, PlaybackRate: 1.0f, Pan: 0.0f));
 
         byte[] reusedBytes = new byte[1024]; // 128 stereo float frames (8 bytes/frame)
-        int firstRead = waveProvider.Read(reusedBytes, 0, reusedBytes.Length);
+        int firstRead = waveProvider.Read(reusedBytes.AsSpan());
         Assert.Equal(reusedBytes.Length, firstRead);
         Assert.Contains(reusedBytes, b => b != 0);
 
         // Next read into the SAME reused byte[] must zero 100% of bytes, including the upper 75%.
-        int secondRead = waveProvider.Read(reusedBytes, 0, reusedBytes.Length);
+        int secondRead = waveProvider.Read(reusedBytes.AsSpan());
         Assert.Equal(reusedBytes.Length, secondRead);
         Assert.All(reusedBytes, b => Assert.Equal((byte)0, b));
     }

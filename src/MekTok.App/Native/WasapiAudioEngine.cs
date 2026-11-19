@@ -1,24 +1,21 @@
 using System.Runtime.InteropServices;
+using MekTok.Core.Audio;
+using MekTok.Core.Platform;
 using NAudio.CoreAudioApi;
-using NAudio.CoreAudioApi.Interfaces;
 using NAudio.Wave;
 
-namespace MekTok.Core.Audio;
-
-public sealed record AudioOutputDeviceInfo(
-    string Id,
-    string FriendlyName,
-    bool IsDefault);
+namespace MekTok.App.Native;
 
 /// <summary>
 /// Low-latency WASAPI playback engine that follows Windows default audio output or
 /// pins a specific output device, safely handling hot-plugging and device switches off COM threads.
 /// </summary>
-public sealed class WasapiAudioEngine : IMMNotificationClient, IDisposable
+public sealed class WasapiAudioEngine : IAudioOutputEngine
 {
     private readonly MMDeviceEnumerator _enumerator = new();
+    private readonly MMDeviceNotificationClient? _notificationClient;
     private readonly SemaphoreSlim _reinitLock = new(1, 1);
-    private WasapiOut? _wasapiOut;
+    private WasapiPlayer? _wasapiPlayer;
     private MMDevice? _activeDevice;
     private string? _preferredDeviceId;
     private int _reinitScheduled;
@@ -29,7 +26,11 @@ public sealed class WasapiAudioEngine : IMMNotificationClient, IDisposable
         Mixer = new KeyboardAudioMixer();
         try
         {
-            _enumerator.RegisterEndpointNotificationCallback(this);
+            _notificationClient = _enumerator.CreateNotificationClient(useSynchronizationContext: false);
+            _notificationClient.DeviceStateChanged += OnDeviceStateChanged;
+            _notificationClient.DeviceAdded += OnDeviceAdded;
+            _notificationClient.DeviceRemoved += OnDeviceRemoved;
+            _notificationClient.DefaultDeviceChanged += OnDefaultDeviceChanged;
         }
         catch
         {
@@ -40,6 +41,7 @@ public sealed class WasapiAudioEngine : IMMNotificationClient, IDisposable
     public KeyboardAudioMixer Mixer { get; }
     public bool HasActiveOutput { get; private set; }
     public string ActiveDeviceName { get; private set; } = "No Audio Output";
+    public double? EstimatedLatencyMs { get; private set; }
 
     public event EventHandler? DevicesChanged;
     public event EventHandler? ActiveDeviceChanged;
@@ -110,6 +112,7 @@ public sealed class WasapiAudioEngine : IMMNotificationClient, IDisposable
             {
                 HasActiveOutput = false;
                 ActiveDeviceName = "No Output Device";
+                EstimatedLatencyMs = null;
                 ActiveDeviceChanged?.Invoke(this, EventArgs.Empty);
                 return;
             }
@@ -119,12 +122,16 @@ public sealed class WasapiAudioEngine : IMMNotificationClient, IDisposable
                 _activeDevice = selected;
                 HasActiveOutput = true;
                 ActiveDeviceName = selected.FriendlyName;
+                EstimatedLatencyMs = _wasapiPlayer?.LatencyMilliseconds > 0
+                    ? _wasapiPlayer.LatencyMilliseconds
+                    : 25;
             }
             else
             {
                 selected.Dispose();
                 HasActiveOutput = false;
                 ActiveDeviceName = "Audio Device Unavailable";
+                EstimatedLatencyMs = null;
             }
 
             ActiveDeviceChanged?.Invoke(this, EventArgs.Empty);
@@ -137,13 +144,21 @@ public sealed class WasapiAudioEngine : IMMNotificationClient, IDisposable
 
     private bool TryStartDevice(MMDevice device, int latencyMs)
     {
-        WasapiOut? candidate = null;
+        WasapiPlayer? candidate = null;
         try
         {
-            candidate = new WasapiOut(device, AudioClientShareMode.Shared, useEventSync: true, latency: latencyMs);
+            candidate = new WasapiPlayerBuilder()
+                .WithDevice(device)
+                .WithSharedMode()
+                .WithEventSync()
+                .WithLatency(latencyMs)
+                .WithLowLatency(required: false)
+                .WithMmcssThreadPriority("Pro Audio")
+                .Build();
+
             candidate.Init(Mixer);
             candidate.Play();
-            _wasapiOut = candidate;
+            _wasapiPlayer = candidate;
             return true;
         }
         catch
@@ -193,8 +208,8 @@ public sealed class WasapiAudioEngine : IMMNotificationClient, IDisposable
     {
         try
         {
-            _wasapiOut?.Stop();
-            _wasapiOut?.Dispose();
+            _wasapiPlayer?.Stop();
+            _wasapiPlayer?.Dispose();
         }
         catch
         {
@@ -202,7 +217,7 @@ public sealed class WasapiAudioEngine : IMMNotificationClient, IDisposable
         }
         finally
         {
-            _wasapiOut = null;
+            _wasapiPlayer = null;
         }
 
         try
@@ -240,26 +255,21 @@ public sealed class WasapiAudioEngine : IMMNotificationClient, IDisposable
         });
     }
 
-    void IMMNotificationClient.OnDeviceStateChanged(string deviceId, DeviceState newState) =>
+    private void OnDeviceStateChanged(object? sender, DeviceStateChangedEventArgs e) =>
         ScheduleReinitAsync();
 
-    void IMMNotificationClient.OnDeviceAdded(string pwstrDeviceId) =>
+    private void OnDeviceAdded(object? sender, DeviceNotificationEventArgs e) =>
         ScheduleReinitAsync();
 
-    void IMMNotificationClient.OnDeviceRemoved(string deviceId) =>
+    private void OnDeviceRemoved(object? sender, DeviceNotificationEventArgs e) =>
         ScheduleReinitAsync();
 
-    void IMMNotificationClient.OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId)
+    private void OnDefaultDeviceChanged(object? sender, DefaultDeviceChangedEventArgs e)
     {
-        if (flow == DataFlow.Render && role == Role.Multimedia)
+        if (e.Flow == DataFlow.Render && e.Role == Role.Multimedia)
         {
             ScheduleReinitAsync();
         }
-    }
-
-    void IMMNotificationClient.OnPropertyValueChanged(string pwstrDeviceId, PropertyKey key)
-    {
-        // No action required on property updates.
     }
 
     public void Dispose()
@@ -267,13 +277,20 @@ public sealed class WasapiAudioEngine : IMMNotificationClient, IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        try
+        if (_notificationClient is not null)
         {
-            _enumerator.UnregisterEndpointNotificationCallback(this);
-        }
-        catch
-        {
-            // Ignore during shutdown.
+            _notificationClient.DeviceStateChanged -= OnDeviceStateChanged;
+            _notificationClient.DeviceAdded -= OnDeviceAdded;
+            _notificationClient.DeviceRemoved -= OnDeviceRemoved;
+            _notificationClient.DefaultDeviceChanged -= OnDefaultDeviceChanged;
+            try
+            {
+                _notificationClient.Dispose();
+            }
+            catch
+            {
+                // Ignore during shutdown.
+            }
         }
 
         _reinitLock.Wait();
@@ -289,4 +306,3 @@ public sealed class WasapiAudioEngine : IMMNotificationClient, IDisposable
         }
     }
 }
-

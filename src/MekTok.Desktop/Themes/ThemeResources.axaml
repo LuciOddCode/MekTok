@@ -1,0 +1,63 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Dark">
+            <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#191B20" />
+            <SolidColorBrush x:Key="SurfaceCardBrush" Color="#23262E" />
+            <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="#2B2F3A" />
+            <SolidColorBrush x:Key="SurfaceSubtleBrush" Color="#20222A" />
+            <SolidColorBrush x:Key="BorderSubtleBrush" Color="#353945" />
+            <SolidColorBrush x:Key="BorderStrongBrush" Color="#4A5060" />
+
+            <SolidColorBrush x:Key="TextPrimaryBrush" Color="#F4F6FB" />
+            <SolidColorBrush x:Key="TextSecondaryBrush" Color="#B6BCCB" />
+            <SolidColorBrush x:Key="TextMutedBrush" Color="#848B9B" />
+
+            <SolidColorBrush x:Key="AccentBrush" Color="#4CC2FF" />
+            <SolidColorBrush x:Key="AccentHoverBrush" Color="#6DD0FF" />
+            <SolidColorBrush x:Key="AccentPressedBrush" Color="#34AEEB" />
+            <SolidColorBrush x:Key="AccentTextBrush" Color="#0C1622" />
+            <SolidColorBrush x:Key="AccentSoftBrush" Color="#1F3748" />
+
+            <SolidColorBrush x:Key="SuccessBrush" Color="#57D9A3" />
+            <SolidColorBrush x:Key="WarningBrush" Color="#FFC857" />
+            <SolidColorBrush x:Key="DangerBrush" Color="#FF6B7A" />
+
+            <SolidColorBrush x:Key="KeycapFillBrush" Color="#2D313D" />
+            <SolidColorBrush x:Key="KeycapBorderBrush" Color="#454B5C" />
+            <SolidColorBrush x:Key="KeycapPressedBrush" Color="#2A5B7C" />
+            <SolidColorBrush x:Key="KeycapSelectedBrush" Color="#1D3E57" />
+            <SolidColorBrush x:Key="KeycapTextBrush" Color="#EDF1F8" />
+        </ResourceDictionary>
+
+        <ResourceDictionary x:Key="Light">
+            <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F3F5F8" />
+            <SolidColorBrush x:Key="SurfaceCardBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="#F9FAFC" />
+            <SolidColorBrush x:Key="SurfaceSubtleBrush" Color="#ECEFF4" />
+            <SolidColorBrush x:Key="BorderSubtleBrush" Color="#DFDFE6" />
+            <SolidColorBrush x:Key="BorderStrongBrush" Color="#C2C5D0" />
+
+            <SolidColorBrush x:Key="TextPrimaryBrush" Color="#17191F" />
+            <SolidColorBrush x:Key="TextSecondaryBrush" Color="#505565" />
+            <SolidColorBrush x:Key="TextMutedBrush" Color="#777D8E" />
+
+            <SolidColorBrush x:Key="AccentBrush" Color="#0067C0" />
+            <SolidColorBrush x:Key="AccentHoverBrush" Color="#0A76D4" />
+            <SolidColorBrush x:Key="AccentPressedBrush" Color="#0055A0" />
+            <SolidColorBrush x:Key="AccentTextBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="AccentSoftBrush" Color="#E3F0FC" />
+
+            <SolidColorBrush x:Key="SuccessBrush" Color="#107C41" />
+            <SolidColorBrush x:Key="WarningBrush" Color="#B86E00" />
+            <SolidColorBrush x:Key="DangerBrush" Color="#C42B1C" />
+
+            <SolidColorBrush x:Key="KeycapFillBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="KeycapBorderBrush" Color="#C7CBD6" />
+            <SolidColorBrush x:Key="KeycapPressedBrush" Color="#BBE0FF" />
+            <SolidColorBrush x:Key="KeycapSelectedBrush" Color="#DCEEFF" />
+            <SolidColorBrush x:Key="KeycapTextBrush" Color="#1D2029" />
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>
+

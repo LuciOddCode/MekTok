@@ -1,6 +1,13 @@
+using MekTok.Core.Platform;
 using Microsoft.Win32;
 
 namespace MekTok.App.Native;
+
+public sealed class WindowsStartupManager : IStartupManager
+{
+    public bool IsEnabled() => StartupManager.IsEnabled();
+    public void SetEnabled(bool enabled) => StartupManager.SetEnabled(enabled);
+}
 
 /// <summary>
 /// Manages automatic Windows login startup under HKCU\...\Run using Environment.ProcessPath

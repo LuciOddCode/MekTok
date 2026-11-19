@@ -1,0 +1,12 @@
+{
+  "solution": {
+    "path": "MekTok.sln",
+    "projects": [
+      "src\\MekTok.Core\\MekTok.Core.csproj",
+      "src\\MekTok.Platform.Desktop\\MekTok.Platform.Desktop.csproj",
+      "src\\MekTok.Desktop\\MekTok.Desktop.csproj",
+      "tests\\MekTok.Core.Tests\\MekTok.Core.Tests.csproj"
+    ]
+  }
+}
+

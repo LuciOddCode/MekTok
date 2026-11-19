@@ -1,6 +1,7 @@
 using NAudio.Vorbis;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
+using NLayer.NAudioSupport;
 
 namespace MekTok.Core.Audio;
 
@@ -102,11 +103,18 @@ public static class AudioLoader
                 disposableReader = wave;
                 provider = wave.ToSampleProvider();
             }
+            else if (ext == ".mp3")
+            {
+                var mp3 = new Mp3FileReaderBase(
+                    filePath,
+                    wf => new Mp3FrameDecompressor(wf));
+                disposableReader = mp3;
+                provider = mp3.ToSampleProvider();
+            }
             else
             {
-                var afr = new AudioFileReader(filePath);
-                disposableReader = afr;
-                provider = afr;
+                throw new NotSupportedException(
+                    $"Unsupported audio format '{ext}'. Supported formats: .wav, .ogg, .mp3.");
             }
 
             if (provider.WaveFormat.SampleRate != AudioClip.StandardSampleRate)
@@ -122,7 +130,7 @@ public static class AudioLoader
             while (monoSamples.Count < maxFrames)
             {
                 int framesRemaining = (int)Math.Min(4096, maxFrames - monoSamples.Count);
-                int samplesRead = provider.Read(readBuffer, 0, framesRemaining * channels);
+                int samplesRead = provider.Read(readBuffer.AsSpan(0, framesRemaining * channels));
                 if (samplesRead <= 0)
                 {
                     break;

@@ -4,8 +4,8 @@ using NAudio.Wave;
 namespace MekTok.Core.Audio;
 
 /// <summary>
-/// Lock-free polyphonic stereo sample mixer implementing <see cref="ISampleProvider"/>.
-/// Pre-allocates a fixed voice pool so WASAPI audio callbacks perform zero heap allocations.
+/// Lock-free polyphonic stereo sample mixer implementing <see cref="ISampleProvider"/> and direct Span pull.
+/// Pre-allocates a fixed voice pool so real-time audio callbacks perform zero heap allocations.
 /// </summary>
 public sealed class KeyboardAudioMixer : ISampleProvider
 {
@@ -65,17 +65,7 @@ public sealed class KeyboardAudioMixer : ISampleProvider
             return;
         }
 
-        // Equal-power stereo pan law: pan in [-1, 1] -> theta in [0, pi/2]
-        float clampedPan = Math.Clamp(sound.Pan, -1.0f, 1.0f);
-        float theta = (clampedPan + 1.0f) * (MathF.PI * 0.25f);
-        float leftGain = MathF.Cos(theta) * sound.Volume;
-        float rightGain = MathF.Sin(theta) * sound.Volume;
-
-        _pendingTriggers.Enqueue(new VoiceTrigger(
-            sound.Clip,
-            leftGain,
-            rightGain,
-            Math.Clamp(sound.PlaybackRate, 0.5f, 2.0f)));
+        EnqueueTrigger(sound.Clip, sound.Volume, sound.Pan, sound.PlaybackRate);
     }
 
     public void TriggerClip(AudioClip clip, float volume = 1f, float pan = 0f, float playbackRate = 1f)
@@ -86,6 +76,12 @@ public sealed class KeyboardAudioMixer : ISampleProvider
             return;
         }
 
+        EnqueueTrigger(clip, volume, pan, playbackRate);
+    }
+
+    private void EnqueueTrigger(AudioClip clip, float volume, float pan, float playbackRate)
+    {
+        // Equal-power stereo pan law: pan in [-1, 1] -> theta in [0, pi/2]
         float clampedPan = Math.Clamp(pan, -1.0f, 1.0f);
         float theta = (clampedPan + 1.0f) * (MathF.PI * 0.25f);
         float leftGain = MathF.Cos(theta) * volume;
@@ -104,30 +100,12 @@ public sealed class KeyboardAudioMixer : ISampleProvider
         Interlocked.Exchange(ref _clearRequested, 1);
     }
 
-    public int Read(float[] buffer, int offset, int count)
+    public int Read(Span<float> destination)
     {
-        // Do not use Array.Clear: NAudio's SampleToWaveProvider passes WaveBuffer.FloatBuffer,
-        // a union-punned byte[] where Array.Clear only zeroes count bytes (25% of floats).
-        for (int i = offset; i < offset + count; i++)
-        {
-            buffer[i] = 0f;
-        }
+        destination.Clear();
+        PrepareVoicesForRead();
 
-        if (Interlocked.Exchange(ref _clearRequested, 0) != 0)
-        {
-            for (int i = 0; i < _voices.Length; i++)
-            {
-                _voices[i].Active = false;
-                _voices[i].Clip = null;
-            }
-        }
-
-        while (_pendingTriggers.TryDequeue(out VoiceTrigger trigger))
-        {
-            AllocateVoice(trigger);
-        }
-
-        int frameCount = count / 2;
+        int frameCount = destination.Length / 2;
         float master = _masterVolume;
 
         for (int v = 0; v < _voices.Length; v++)
@@ -161,35 +139,59 @@ public sealed class KeyboardAudioMixer : ISampleProvider
                 float s1 = (idx0 + 1 < len) ? samples[idx0 + 1] : 0f;
                 float mono = s0 + ((s1 - s0) * frac);
 
-                int outIdx = offset + (f * 2);
-                buffer[outIdx] += mono * lGain;
-                buffer[outIdx + 1] += mono * rGain;
+                int outIdx = f * 2;
+                destination[outIdx] += mono * lGain;
+                destination[outIdx + 1] += mono * rGain;
 
                 pos += rate;
             }
 
-            if (voice.Active)
-            {
-                voice.Position = pos;
-                if (pos >= len)
-                {
-                    voice.Active = false;
-                    voice.Clip = null;
-                }
-            }
+            FinalizeVoicePosition(ref voice, pos, len);
         }
 
-        // Smooth soft-clipper on master stereo bus to protect speakers under heavy chords
-        for (int i = offset; i < offset + count; i++)
+        for (int i = 0; i < destination.Length; i++)
         {
-            float s = buffer[i];
+            float s = destination[i];
             if (s > 0.85f || s < -0.85f)
             {
-                buffer[i] = MathF.Tanh(s);
+                destination[i] = MathF.Tanh(s);
             }
         }
 
-        return count;
+        return destination.Length;
+    }
+
+    public int Read(float[] buffer, int offset, int count) =>
+        Read(buffer.AsSpan(offset, count));
+
+    private void PrepareVoicesForRead()
+    {
+        if (Interlocked.Exchange(ref _clearRequested, 0) != 0)
+        {
+            for (int i = 0; i < _voices.Length; i++)
+            {
+                _voices[i].Active = false;
+                _voices[i].Clip = null;
+            }
+        }
+
+        while (_pendingTriggers.TryDequeue(out VoiceTrigger trigger))
+        {
+            AllocateVoice(trigger);
+        }
+    }
+
+    private static void FinalizeVoicePosition(ref VoiceState voice, double pos, int len)
+    {
+        if (voice.Active)
+        {
+            voice.Position = pos;
+            if (pos >= len)
+            {
+                voice.Active = false;
+                voice.Clip = null;
+            }
+        }
     }
 
     private void AllocateVoice(in VoiceTrigger trigger)
@@ -224,4 +226,3 @@ public sealed class KeyboardAudioMixer : ISampleProvider
         slot.Active = true;
     }
 }
-

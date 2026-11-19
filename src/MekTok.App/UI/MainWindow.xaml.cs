@@ -7,11 +7,12 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using MekTok.App.Native;
-using MekTok.App.Services;
 using MekTok.Core.Audio;
 using MekTok.Core.Config;
 using MekTok.Core.Keyboard;
 using MekTok.Core.Packs;
+using MekTok.Core.Platform;
+using MekTok.Core.Services;
 using Microsoft.Win32;
 using WinForms = System.Windows.Forms;
 
@@ -30,6 +31,7 @@ public partial class MainWindow : Window
     }
 
     private readonly MekTokController _controller;
+    private readonly WindowsThemeService _themeService;
     private readonly Dictionary<KeyGroup, ToggleButton> _groupChips = new();
 
     private KeyDefinition? _selectedKey = Ansi104Layout.TryGetByScanCode(0x0039); // Default to Spacebar
@@ -43,9 +45,10 @@ public partial class MainWindow : Window
     private TextBlock? _activeRecordingKeysBlock;
     private Button? _activeRecordButton;
 
-    public MainWindow(MekTokController controller)
+    public MainWindow(MekTokController controller, WindowsThemeService themeService)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
+        _themeService = themeService ?? throw new ArgumentNullException(nameof(themeService));
         _isRefreshing = true;
         InitializeComponent();
 
@@ -62,7 +65,7 @@ public partial class MainWindow : Window
         _controller.CombosChanged += (_, _) => Dispatcher.BeginInvoke(RefreshCombosList);
         _controller.KeyActivityObserved += OnKeyActivityObserved;
 
-        SourceInitialized += (_, _) => _controller.ThemeService.ApplyWindowChrome(this);
+        SourceInitialized += (_, _) => _themeService.ApplyWindowChrome(this);
         IsVisibleChanged += (_, _) =>
         {
             _controller.NotifyConfiguratorVisibility(IsVisible);
@@ -858,7 +861,7 @@ public partial class MainWindow : Window
         {
             Enabled = HotkeyEnabledCheck.IsChecked == true,
             Modifiers = _controller.Settings.MuteHotkey.Modifiers,
-            VirtualKey = _controller.Settings.MuteHotkey.VirtualKey
+            Key = _controller.Settings.MuteHotkey.Key
         };
         _controller.SetMuteHotkey(updated);
     }
@@ -899,14 +902,21 @@ public partial class MainWindow : Window
         if (mods.HasFlag(ModifierKeys.Control)) hkMods |= HotkeyModifiers.Control;
         if (mods.HasFlag(ModifierKeys.Alt)) hkMods |= HotkeyModifiers.Alt;
         if (mods.HasFlag(ModifierKeys.Shift)) hkMods |= HotkeyModifiers.Shift;
-        if (mods.HasFlag(ModifierKeys.Windows)) hkMods |= HotkeyModifiers.Win;
+        if (mods.HasFlag(ModifierKeys.Windows)) hkMods |= HotkeyModifiers.Meta;
 
         int vk = KeyInterop.VirtualKeyFromKey(key);
+        HotkeyKey hkKey = HotkeyKeyExtensions.FromWin32VirtualKey(vk);
+        if (hkKey == HotkeyKey.None)
+        {
+            HotkeyStatusText.Text = "Unsupported key for global shortcut.";
+            return;
+        }
+
         var config = new HotkeyConfig
         {
             Enabled = true,
             Modifiers = hkMods,
-            VirtualKey = vk
+            Key = hkKey
         };
 
         _isCapturingHotkey = false;
@@ -929,7 +939,7 @@ public partial class MainWindow : Window
 
     private void RefreshRunningProcesses()
     {
-        RunningAppsCombo.ItemsSource = ActiveWindowMonitor.GetRunningUserProcesses();
+        RunningAppsCombo.ItemsSource = _controller.GetRunningUserProcesses();
         if (RunningAppsCombo.Items.Count > 0 && RunningAppsCombo.SelectedIndex < 0)
         {
             RunningAppsCombo.SelectedIndex = 0;
@@ -1047,6 +1057,7 @@ public partial class MainWindow : Window
             Enum.TryParse<ThemePreference>(raw, out ThemePreference pref))
         {
             _controller.SetTheme(pref);
+            _themeService.ApplyTheme(pref);
             RefreshKeyboards();
         }
     }
