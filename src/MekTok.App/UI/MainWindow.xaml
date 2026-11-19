@@ -81,6 +81,11 @@
                                  GroupName="MainNav"
                                  Style="{StaticResource FluentNavRadio}"
                                  Checked="OnNavChanged" />
+                    <RadioButton x:Name="NavCombos"
+                                 Content="Key Sound Combos"
+                                 GroupName="MainNav"
+                                 Style="{StaticResource FluentNavRadio}"
+                                 Checked="OnNavChanged" />
                     <RadioButton x:Name="NavSettings"
                                  Content="Smart Controls &amp; Settings"
                                  GroupName="MainNav"
@@ -805,6 +810,36 @@
                             </StackPanel>
                         </Grid>
                     </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- VIEW 4: CUSTOM KEY COMBINATIONS -->
+            <ScrollViewer x:Name="ViewCombos" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <Grid Margin="0,0,0,16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Custom Key Combination Sounds"
+                                       FontSize="20"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="Assign custom sound effects (WAV, MP3, OGG) to simultaneous key chords like Shift+Y+! or Ctrl+Alt+W."
+                                       FontSize="12.5"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Margin="0,3,0,0" />
+                        </StackPanel>
+
+                        <Button Grid.Column="1"
+                                Content="+ Add New Combo"
+                                Style="{StaticResource FluentPrimaryButton}"
+                                VerticalAlignment="Center"
+                                Click="OnAddNewComboClick" />
+                    </Grid>
+
+                    <StackPanel x:Name="CombosListPanel" />
                 </StackPanel>
             </ScrollViewer>
         </Grid>

@@ -38,6 +38,11 @@ public partial class MainWindow : Window
     private bool _isRefreshing;
     private bool _isCapturingHotkey;
 
+    private string? _recordingComboId;
+    private readonly HashSet<int> _recordedComboScanCodes = [];
+    private TextBlock? _activeRecordingKeysBlock;
+    private Button? _activeRecordButton;
+
     public MainWindow(MekTokController controller)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
@@ -54,6 +59,7 @@ public partial class MainWindow : Window
         _controller.ProfilesChanged += (_, _) => Dispatcher.BeginInvoke(RefreshProfilesAndPacks);
         _controller.AudioDevicesChanged += (_, _) => Dispatcher.BeginInvoke(RefreshDevices);
         _controller.KeyboardsChanged += (_, _) => Dispatcher.BeginInvoke(RefreshKeyboards);
+        _controller.CombosChanged += (_, _) => Dispatcher.BeginInvoke(RefreshCombosList);
         _controller.KeyActivityObserved += OnKeyActivityObserved;
 
         SourceInitialized += (_, _) => _controller.ThemeService.ApplyWindowChrome(this);
@@ -128,10 +134,11 @@ public partial class MainWindow : Window
 
     private void OnNavChanged(object sender, RoutedEventArgs e)
     {
-        if (ViewConfigurator is null || ViewAcoustics is null || ViewSettings is null) return;
+        if (ViewConfigurator is null || ViewAcoustics is null || ViewSettings is null || ViewCombos is null) return;
 
         ViewConfigurator.Visibility = NavConfigurator.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         ViewAcoustics.Visibility = NavAcoustics.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        ViewCombos.Visibility = NavCombos.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         ViewSettings.Visibility = NavSettings.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -140,6 +147,16 @@ public partial class MainWindow : Window
     private void OnKeyActivityObserved(int scanCode, bool isKeyUp)
     {
         VisualKeyboard.SetKeyPressed(scanCode, !isKeyUp);
+
+        if (_recordingComboId != null && !isKeyUp)
+        {
+            _recordedComboScanCodes.Add(scanCode);
+            if (_activeRecordingKeysBlock != null)
+            {
+                var labels = _recordedComboScanCodes.OrderBy(c => c).Select(CustomKeyCombo.FormatScanCode);
+                _activeRecordingKeysBlock.Text = string.Join(" + ", labels);
+            }
+        }
     }
 
     private void RefreshAllState()
@@ -179,6 +196,7 @@ public partial class MainWindow : Window
             RefreshAcousticsControls();
             RefreshImportedPacksList();
             RefreshExcludedAppsList();
+            RefreshCombosList();
 
             HotkeyEnabledCheck.IsChecked = s.MuteHotkey.Enabled;
             if (!_isCapturingHotkey)
@@ -1042,5 +1060,397 @@ public partial class MainWindow : Window
     private void OnOpenDataFolderClick(object sender, RoutedEventArgs e)
     {
         _controller.OpenDataDirectoryInExplorer();
+    }
+
+    private void RefreshCombosList()
+    {
+        if (CombosListPanel is null) return;
+
+        CombosListPanel.Children.Clear();
+        List<CustomKeyCombo> combos = _controller.Settings.CustomCombos;
+
+        if (combos.Count == 0)
+        {
+            var empty = new Border
+            {
+                Style = (Style)FindResource("FluentCardBorder"),
+                Padding = new Thickness(24),
+                Margin = new Thickness(0, 0, 0, 12)
+            };
+            var emptyStack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center };
+            emptyStack.Children.Add(new TextBlock
+            {
+                Text = "No custom key combinations created yet.",
+                FontSize = 14,
+                FontWeight = FontWeights.Medium,
+                HorizontalAlignment = HorizontalAlignment.Center
+            });
+            var hint = new TextBlock
+            {
+                Text = "Click '+ Add New Combo' above to map chords like Shift+Y+! or Ctrl+Alt+W to custom sound effects.",
+                FontSize = 12,
+                Margin = new Thickness(0, 4, 0, 12),
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            hint.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+            emptyStack.Children.Add(hint);
+
+            var addBtn = new Button
+            {
+                Content = "+ Create First Combo",
+                Style = (Style)FindResource("FluentPrimaryButton"),
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            addBtn.Click += OnAddNewComboClick;
+            emptyStack.Children.Add(addBtn);
+
+            empty.Child = emptyStack;
+            CombosListPanel.Children.Add(empty);
+            return;
+        }
+
+        Style cardStyle = (Style)FindResource("FluentCardBorder");
+        Style switchStyle = (Style)FindResource("FluentSwitchCheckBox");
+        Style primaryBtnStyle = (Style)FindResource("FluentPrimaryButton");
+        Style secondaryBtnStyle = (Style)FindResource("FluentSecondaryButton");
+
+        foreach (CustomKeyCombo combo in combos)
+        {
+            var card = new Border
+            {
+                Style = cardStyle,
+                Margin = new Thickness(0, 0, 0, 12),
+                Padding = new Thickness(16)
+            };
+
+            var rootGrid = new Grid();
+            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            // Row 0: Header (Name, Enable Switch, Delete)
+            var headerGrid = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var nameBox = new TextBox
+            {
+                Text = combo.Name,
+                FontSize = 14,
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 0, 12, 0),
+                Padding = new Thickness(6, 4, 6, 4),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            string capturedId = combo.Id;
+            nameBox.LostFocus += (_, _) =>
+            {
+                if (string.IsNullOrWhiteSpace(nameBox.Text)) nameBox.Text = "Custom Combo";
+                combo.Name = nameBox.Text.Trim();
+                _controller.UpdateCustomCombo(combo);
+            };
+            nameBox.KeyDown += (_, ke) =>
+            {
+                if (ke.Key == Key.Enter)
+                {
+                    Keyboard.ClearFocus();
+                }
+            };
+            headerGrid.Children.Add(nameBox);
+            Grid.SetColumn(nameBox, 0);
+
+            var enableToggle = new CheckBox
+            {
+                Content = "Enabled",
+                IsChecked = combo.IsEnabled,
+                Style = switchStyle,
+                Margin = new Thickness(0, 0, 12, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            enableToggle.Checked += (_, _) =>
+            {
+                combo.IsEnabled = true;
+                _controller.UpdateCustomCombo(combo);
+            };
+            enableToggle.Unchecked += (_, _) =>
+            {
+                combo.IsEnabled = false;
+                _controller.UpdateCustomCombo(combo);
+            };
+            headerGrid.Children.Add(enableToggle);
+            Grid.SetColumn(enableToggle, 1);
+
+            var deleteBtn = new Button
+            {
+                Content = "Delete",
+                Style = secondaryBtnStyle,
+                Padding = new Thickness(10, 4, 10, 4),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            deleteBtn.Click += (_, _) =>
+            {
+                _controller.RemoveCustomCombo(capturedId);
+            };
+            headerGrid.Children.Add(deleteBtn);
+            Grid.SetColumn(deleteBtn, 2);
+
+            rootGrid.Children.Add(headerGrid);
+            Grid.SetRow(headerGrid, 0);
+
+            // Row 1: Keys Row
+            var keysBorder = new Border
+            {
+                Background = (Brush)FindResource("SurfaceSubtleBrush"),
+                BorderBrush = (Brush)FindResource("BorderSubtleBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12, 8, 12, 8),
+                Margin = new Thickness(0, 0, 0, 12)
+            };
+            var keysGrid = new Grid();
+            keysGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            keysGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            keysGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var keysDisplay = new TextBlock
+            {
+                Text = combo.FormatKeysDisplay(),
+                FontSize = 13,
+                FontWeight = FontWeights.Bold,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            keysDisplay.SetResourceReference(TextBlock.ForegroundProperty, "AccentBrush");
+            keysGrid.Children.Add(keysDisplay);
+            Grid.SetColumn(keysDisplay, 0);
+
+            var recordBtn = new Button
+            {
+                Content = _recordingComboId == combo.Id ? "Listening... (Press Keys & Click When Done)" : "Record Keys",
+                Style = _recordingComboId == combo.Id ? primaryBtnStyle : secondaryBtnStyle,
+                Margin = new Thickness(0, 0, 8, 0),
+                Padding = new Thickness(12, 4, 12, 4),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            recordBtn.Click += (_, _) =>
+            {
+                if (_recordingComboId == combo.Id)
+                {
+                    FinishRecordingCombo(combo, keysDisplay, recordBtn);
+                }
+                else
+                {
+                    StartRecordingCombo(combo, keysDisplay, recordBtn);
+                }
+            };
+            keysGrid.Children.Add(recordBtn);
+            Grid.SetColumn(recordBtn, 1);
+
+            var clearKeysBtn = new Button
+            {
+                Content = "Clear Keys",
+                Style = secondaryBtnStyle,
+                Padding = new Thickness(10, 4, 10, 4),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            clearKeysBtn.Click += (_, _) =>
+            {
+                combo.ScanCodes.Clear();
+                _controller.UpdateCustomCombo(combo);
+                keysDisplay.Text = combo.FormatKeysDisplay();
+            };
+            keysGrid.Children.Add(clearKeysBtn);
+            Grid.SetColumn(clearKeysBtn, 2);
+
+            keysBorder.Child = keysGrid;
+            rootGrid.Children.Add(keysBorder);
+            Grid.SetRow(keysBorder, 1);
+
+            // Row 2: Sound and Volume Controls
+            var soundGrid = new Grid();
+            soundGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.4, GridUnitType.Star) });
+            soundGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            soundGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.0, GridUnitType.Star) });
+            soundGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            soundGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var soundFileStack = new StackPanel { Margin = new Thickness(0, 0, 10, 0) };
+            var soundLabel = new TextBlock
+            {
+                Text = "Audio Sound Effect",
+                FontSize = 11,
+                Margin = new Thickness(0, 0, 0, 2)
+            };
+            soundLabel.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+            soundFileStack.Children.Add(soundLabel);
+
+            var soundFileText = new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(combo.AudioFilePath)
+                    ? "(No sound file selected)"
+                    : System.IO.Path.GetFileName(combo.AudioFilePath),
+                FontSize = 12.5,
+                FontWeight = FontWeights.Medium,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            soundFileStack.Children.Add(soundFileText);
+            soundGrid.Children.Add(soundFileStack);
+            Grid.SetColumn(soundFileStack, 0);
+
+            var browseBtn = new Button
+            {
+                Content = "Browse Audio...",
+                Style = secondaryBtnStyle,
+                Margin = new Thickness(0, 0, 16, 0),
+                Padding = new Thickness(10, 4, 10, 4),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            browseBtn.Click += (_, _) =>
+            {
+                var dialog = new OpenFileDialog
+                {
+                    Title = "Select Audio Effect for " + combo.Name,
+                    Filter = "Audio Files (*.wav;*.mp3;*.ogg)|*.wav;*.mp3;*.ogg|All Files (*.*)|*.*"
+                };
+                if (dialog.ShowDialog(this) == true)
+                {
+                    try
+                    {
+                        string importedPath = _controller.ImportComboAudioFile(dialog.FileName);
+                        combo.AudioFilePath = importedPath;
+                        _controller.UpdateCustomCombo(combo);
+                        soundFileText.Text = System.IO.Path.GetFileName(importedPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(this, "Could not import audio: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    }
+                }
+            };
+            soundGrid.Children.Add(browseBtn);
+            Grid.SetColumn(browseBtn, 1);
+
+            var volStack = new StackPanel { Margin = new Thickness(0, 0, 16, 0) };
+            var volHeaderGrid = new Grid();
+            var volLabel = new TextBlock { Text = "Volume", FontSize = 11 };
+            volLabel.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+            var volVal = new TextBlock
+            {
+                Text = $"{(int)Math.Round(combo.Volume * 100)}%",
+                FontSize = 11,
+                FontWeight = FontWeights.Medium,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            volHeaderGrid.Children.Add(volLabel);
+            volHeaderGrid.Children.Add(volVal);
+            volStack.Children.Add(volHeaderGrid);
+
+            var volSlider = new Slider
+            {
+                Minimum = 0,
+                Maximum = 150,
+                Value = Math.Round(combo.Volume * 100),
+                SmallChange = 5,
+                LargeChange = 25,
+                Margin = new Thickness(0, 2, 0, 0)
+            };
+            volSlider.ValueChanged += (_, ve) =>
+            {
+                int pct = (int)Math.Round(ve.NewValue);
+                volVal.Text = $"{pct}%";
+                combo.Volume = pct / 100f;
+                _controller.UpdateCustomCombo(combo);
+            };
+            volStack.Children.Add(volSlider);
+            soundGrid.Children.Add(volStack);
+            Grid.SetColumn(volStack, 2);
+
+            var suppressCheck = new CheckBox
+            {
+                Content = "Mute Switch Sound",
+                IsChecked = combo.SuppressSwitchSound,
+                Style = switchStyle,
+                Margin = new Thickness(0, 0, 16, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = "Suppresses standard mechanical switch sound when this combination triggers."
+            };
+            suppressCheck.Checked += (_, _) =>
+            {
+                combo.SuppressSwitchSound = true;
+                _controller.UpdateCustomCombo(combo);
+            };
+            suppressCheck.Unchecked += (_, _) =>
+            {
+                combo.SuppressSwitchSound = false;
+                _controller.UpdateCustomCombo(combo);
+            };
+            soundGrid.Children.Add(suppressCheck);
+            Grid.SetColumn(suppressCheck, 3);
+
+            var testBtn = new Button
+            {
+                Content = "Test Sound",
+                Style = secondaryBtnStyle,
+                Padding = new Thickness(12, 4, 12, 4),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            testBtn.Click += (_, _) =>
+            {
+                _controller.TestPlayCustomCombo(combo);
+            };
+            soundGrid.Children.Add(testBtn);
+            Grid.SetColumn(testBtn, 4);
+
+            rootGrid.Children.Add(soundGrid);
+            Grid.SetRow(soundGrid, 2);
+
+            card.Child = rootGrid;
+            CombosListPanel.Children.Add(card);
+        }
+    }
+
+    private void StartRecordingCombo(CustomKeyCombo combo, TextBlock keysDisplay, Button recordBtn)
+    {
+        _recordingComboId = combo.Id;
+        _recordedComboScanCodes.Clear();
+        _activeRecordingKeysBlock = keysDisplay;
+        _activeRecordButton = recordBtn;
+
+        recordBtn.Content = "Listening... (Press Keys & Click When Done)";
+        recordBtn.Style = (Style)FindResource("FluentPrimaryButton");
+        keysDisplay.Text = "Listening for keyboard input...";
+    }
+
+    private void FinishRecordingCombo(CustomKeyCombo combo, TextBlock keysDisplay, Button recordBtn)
+    {
+        _recordingComboId = null;
+        _activeRecordingKeysBlock = null;
+        _activeRecordButton = null;
+
+        recordBtn.Content = "Record Keys";
+        recordBtn.Style = (Style)FindResource("FluentSecondaryButton");
+
+        if (_recordedComboScanCodes.Count > 0)
+        {
+            combo.ScanCodes = _recordedComboScanCodes.OrderBy(c => c).ToList();
+            _controller.UpdateCustomCombo(combo);
+        }
+
+        keysDisplay.Text = combo.FormatKeysDisplay();
+    }
+
+    private void OnAddNewComboClick(object sender, RoutedEventArgs e)
+    {
+        var combo = new CustomKeyCombo
+        {
+            Name = $"Combo #{_controller.Settings.CustomCombos.Count + 1}",
+            IsEnabled = true,
+            Volume = 1.0f,
+            SuppressSwitchSound = true
+        };
+
+        _controller.AddCustomCombo(combo);
+        NavCombos.IsChecked = true;
     }
 }

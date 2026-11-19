@@ -194,6 +194,7 @@ public sealed class AppSettings
     public bool StartWithWindows { get; set; }
     public bool HideNumpadInConfigurator { get; set; }
     public ThemePreference Theme { get; set; } = ThemePreference.System;
+    public List<CustomKeyCombo> CustomCombos { get; set; } = [];
     public Dictionary<string, ProfileCustomization> ProfileCustomizations { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -234,6 +235,12 @@ public sealed class AppSettings
         DisabledKeyboardDeviceIds = new HashSet<string>(
             (DisabledKeyboardDeviceIds ?? []).Where(s => !string.IsNullOrWhiteSpace(s)),
             StringComparer.OrdinalIgnoreCase);
+
+        CustomCombos ??= [];
+        foreach (CustomKeyCombo combo in CustomCombos)
+        {
+            combo.Normalize();
+        }
 
         ProfileCustomizations ??= new Dictionary<string, ProfileCustomization>(StringComparer.OrdinalIgnoreCase);
         var normalizedDict = new Dictionary<string, ProfileCustomization>(StringComparer.OrdinalIgnoreCase);

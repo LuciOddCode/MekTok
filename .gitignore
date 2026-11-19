@@ -6,4 +6,5 @@ publish/
 *.suo
 TestResults/
 *.log
+.dotnet_tmp/
 

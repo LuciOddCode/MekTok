@@ -78,6 +78,26 @@ public sealed class KeyboardAudioMixer : ISampleProvider
             Math.Clamp(sound.PlaybackRate, 0.5f, 2.0f)));
     }
 
+    public void TriggerClip(AudioClip clip, float volume = 1f, float pan = 0f, float playbackRate = 1f)
+    {
+        ArgumentNullException.ThrowIfNull(clip);
+        if (clip.Length == 0 || volume <= 0.0001f)
+        {
+            return;
+        }
+
+        float clampedPan = Math.Clamp(pan, -1.0f, 1.0f);
+        float theta = (clampedPan + 1.0f) * (MathF.PI * 0.25f);
+        float leftGain = MathF.Cos(theta) * volume;
+        float rightGain = MathF.Sin(theta) * volume;
+
+        _pendingTriggers.Enqueue(new VoiceTrigger(
+            clip,
+            leftGain,
+            rightGain,
+            Math.Clamp(playbackRate, 0.5f, 2.0f)));
+    }
+
     public void ClearAllVoices()
     {
         while (_pendingTriggers.TryDequeue(out _)) { }

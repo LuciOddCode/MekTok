@@ -28,6 +28,7 @@ public sealed class SettingsStore
         SettingsFilePath = Path.Combine(RootDirectory, "settings.json");
         PacksDirectory = Path.Combine(RootDirectory, "packs");
         CustomAudioDirectory = Path.Combine(RootDirectory, "custom-audio");
+        CombosDirectory = Path.Combine(RootDirectory, "combos");
         LogsDirectory = Path.Combine(RootDirectory, "logs");
     }
 
@@ -35,6 +36,7 @@ public sealed class SettingsStore
     public string SettingsFilePath { get; }
     public string PacksDirectory { get; }
     public string CustomAudioDirectory { get; }
+    public string CombosDirectory { get; }
     public string LogsDirectory { get; }
 
     public void EnsureDirectories()
@@ -42,6 +44,7 @@ public sealed class SettingsStore
         Directory.CreateDirectory(RootDirectory);
         Directory.CreateDirectory(PacksDirectory);
         Directory.CreateDirectory(CustomAudioDirectory);
+        Directory.CreateDirectory(CombosDirectory);
         Directory.CreateDirectory(LogsDirectory);
     }
 
@@ -91,6 +94,30 @@ public sealed class SettingsStore
             File.WriteAllText(tempPath, json);
             File.Move(tempPath, SettingsFilePath, overwrite: true);
         }
+    }
+
+    public string CopyComboAudioFile(string sourceFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourceFilePath))
+        {
+            throw new ArgumentException("Source file path cannot be empty.", nameof(sourceFilePath));
+        }
+
+        if (!File.Exists(sourceFilePath))
+        {
+            throw new FileNotFoundException("Combo audio file not found.", sourceFilePath);
+        }
+
+        EnsureDirectories();
+        string ext = Path.GetExtension(sourceFilePath).ToLowerInvariant();
+        string baseName = Path.GetFileNameWithoutExtension(sourceFilePath);
+        string sanitizedBase = string.Join("_", baseName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
+        if (string.IsNullOrWhiteSpace(sanitizedBase)) sanitizedBase = "combo_sound";
+
+        string targetFileName = $"{sanitizedBase}_{Guid.NewGuid():N}{ext}";
+        string targetPath = Path.Combine(CombosDirectory, targetFileName);
+        File.Copy(sourceFilePath, targetPath, overwrite: true);
+        return targetPath;
     }
 
     private void TryBackupCorruptSettings()

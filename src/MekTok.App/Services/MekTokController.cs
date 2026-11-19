@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
@@ -36,6 +37,12 @@ public sealed class MekTokController : IDisposable
     private readonly WindowsThemeService _themeService;
     private readonly KeyRepeatFilter _repeatFilter = new();
     private readonly object _saveSync = new();
+    private readonly object _chordSync = new();
+
+    private readonly ConcurrentDictionary<string, AudioClip> _comboClipsCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<int> _currentlyPressedScanCodes = [];
+    private readonly HashSet<string> _triggeredCombos = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<int> _comboSuppressedScanCodes = [];
 
     private CancellationTokenSource? _saveDebounceCts;
     private CancellationTokenSource? _synthDebounceCts;
@@ -72,6 +79,7 @@ public sealed class MekTokController : IDisposable
     public event EventHandler? ProfilesChanged;
     public event EventHandler? AudioDevicesChanged;
     public event EventHandler? KeyboardsChanged;
+    public event EventHandler? CombosChanged;
     public event Action<int, bool>? KeyActivityObserved;
 
     private void InitializeEngine()
@@ -94,6 +102,8 @@ public sealed class MekTokController : IDisposable
         _audioEngine.Mixer.MasterVolume = Settings.MasterVolume;
         _audioEngine.Start(Settings.OutputDeviceId);
 
+        ReloadComboAudioClips();
+
         _audioEngine.DevicesChanged += (_, _) => AudioDevicesChanged?.Invoke(this, EventArgs.Empty);
         _audioEngine.ActiveDeviceChanged += (_, _) => StateChanged?.Invoke(this, EventArgs.Empty);
 
@@ -109,6 +119,12 @@ public sealed class MekTokController : IDisposable
         _windowMonitor.AutoPauseStateChanged += (_, _) =>
         {
             _repeatFilter.Reset();
+            lock (_chordSync)
+            {
+                _currentlyPressedScanCodes.Clear();
+                _triggeredCombos.Clear();
+                _comboSuppressedScanCodes.Clear();
+            }
             StateChanged?.Invoke(this, EventArgs.Empty);
         };
         _windowMonitor.UpdateRules(Settings.ExcludedProcessNames, Settings.MuteInFullscreen);
@@ -568,6 +584,75 @@ public sealed class MekTokController : IDisposable
                 () => KeyActivityObserved?.Invoke(ev.CanonicalScanCode, ev.IsKeyUp));
         }
 
+        bool suppressSwitchSound = false;
+
+        lock (_chordSync)
+        {
+            if (!ev.IsKeyUp)
+            {
+                _currentlyPressedScanCodes.Add(ev.CanonicalScanCode);
+
+                if (Settings.IsEnabled && !_windowMonitor.IsAutoPaused)
+                {
+                    foreach (CustomKeyCombo combo in Settings.CustomCombos)
+                    {
+                        if (!combo.IsEnabled || combo.ScanCodes.Count == 0)
+                        {
+                            continue;
+                        }
+
+                        if (combo.ScanCodes.Contains(ev.CanonicalScanCode) &&
+                            combo.ScanCodes.All(_currentlyPressedScanCodes.Contains))
+                        {
+                            if (_triggeredCombos.Add(combo.Id))
+                            {
+                                if (_comboClipsCache.TryGetValue(combo.Id, out AudioClip? clip))
+                                {
+                                    _audioEngine.Mixer.TriggerClip(clip, combo.Volume * Settings.MasterVolume);
+                                }
+
+                                if (combo.SuppressSwitchSound)
+                                {
+                                    suppressSwitchSound = true;
+                                    foreach (int sc in combo.ScanCodes)
+                                    {
+                                        _comboSuppressedScanCodes.Add(sc);
+                                    }
+                                }
+                            }
+                            else if (combo.SuppressSwitchSound)
+                            {
+                                suppressSwitchSound = true;
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                _currentlyPressedScanCodes.Remove(ev.CanonicalScanCode);
+
+                foreach (CustomKeyCombo combo in Settings.CustomCombos)
+                {
+                    if (_triggeredCombos.Contains(combo.Id) &&
+                        !combo.ScanCodes.All(_currentlyPressedScanCodes.Contains))
+                    {
+                        _triggeredCombos.Remove(combo.Id);
+                    }
+                }
+
+                if (_comboSuppressedScanCodes.Remove(ev.CanonicalScanCode))
+                {
+                    suppressSwitchSound = true;
+                }
+            }
+        }
+
+        if (suppressSwitchSound)
+        {
+            return;
+        }
+
         if (!Settings.IsEnabled || _windowMonitor.IsAutoPaused)
         {
             return;
@@ -592,6 +677,97 @@ public sealed class MekTokController : IDisposable
         {
             _audioEngine.Mixer.Trigger(resolved);
         }
+    }
+
+    public void ReloadComboAudioClips()
+    {
+        _comboClipsCache.Clear();
+        foreach (CustomKeyCombo combo in Settings.CustomCombos)
+        {
+            if (string.IsNullOrWhiteSpace(combo.AudioFilePath) || !File.Exists(combo.AudioFilePath))
+            {
+                continue;
+            }
+
+            try
+            {
+                AudioClip clip = AudioLoader.LoadClip(combo.AudioFilePath, maxDurationMs: 20000);
+                _comboClipsCache[combo.Id] = clip;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Failed to load combo clip '{combo.Name}': {ex.Message}");
+            }
+        }
+    }
+
+    public void AddCustomCombo(CustomKeyCombo combo)
+    {
+        ArgumentNullException.ThrowIfNull(combo);
+        combo.Normalize();
+        Settings.CustomCombos.Add(combo);
+        ReloadComboAudioClips();
+        SaveDebounced();
+        CombosChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void UpdateCustomCombo(CustomKeyCombo combo)
+    {
+        ArgumentNullException.ThrowIfNull(combo);
+        combo.Normalize();
+        int index = Settings.CustomCombos.FindIndex(c => string.Equals(c.Id, combo.Id, StringComparison.OrdinalIgnoreCase));
+        if (index >= 0)
+        {
+            Settings.CustomCombos[index] = combo;
+        }
+        else
+        {
+            Settings.CustomCombos.Add(combo);
+        }
+        ReloadComboAudioClips();
+        SaveDebounced();
+        CombosChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void RemoveCustomCombo(string comboId)
+    {
+        if (Settings.CustomCombos.RemoveAll(c => string.Equals(c.Id, comboId, StringComparison.OrdinalIgnoreCase)) > 0)
+        {
+            _comboClipsCache.TryRemove(comboId, out _);
+            SaveDebounced();
+            CombosChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    public void TestPlayCustomCombo(CustomKeyCombo combo)
+    {
+        ArgumentNullException.ThrowIfNull(combo);
+        if (!_comboClipsCache.TryGetValue(combo.Id, out AudioClip? clip))
+        {
+            if (!string.IsNullOrWhiteSpace(combo.AudioFilePath) && File.Exists(combo.AudioFilePath))
+            {
+                try
+                {
+                    clip = AudioLoader.LoadClip(combo.AudioFilePath, maxDurationMs: 20000);
+                    _comboClipsCache[combo.Id] = clip;
+                }
+                catch
+                {
+                    return;
+                }
+            }
+            else
+            {
+                return;
+            }
+        }
+
+        _audioEngine.Mixer.TriggerClip(clip, combo.Volume * Settings.MasterVolume);
+    }
+
+    public string ImportComboAudioFile(string sourceFilePath)
+    {
+        return _settingsStore.CopyComboAudioFile(sourceFilePath);
     }
 
     private void ScheduleSynthRebuild()
