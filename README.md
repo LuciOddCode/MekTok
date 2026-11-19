@@ -18,6 +18,7 @@ MekTok is a lightweight, low-latency mechanical keyboard sound simulator for Win
   - IBM Model M (Classic buckling spring)
 - **Ultra-Low Latency Audio**: Driven by NAudio and Windows WASAPI with real-time in-memory mixing.
 - **Custom Mechvibes Sound Packs**: Import custom sound packs (`config.json` + `.wav` / `.mp3`) with one click.
+- **Custom Key Combination Sounds**: Map simultaneous key chords (e.g. `Shift + Y + !` or `Ctrl + Alt + W`) to custom sound effects (`.wav`, `.mp3`, `.ogg`) with interactive live keyboard recording and automatic switch sound suppression.
 - **Visual Keyboard Configurator**: Interactive ANSI 104-key visual keyboard map to test and customize switch sounds per key group.
 - **Independent Controls**: Master volume, key-up release sounds toggle, and realistic stereo panning (sound pans slightly left or right depending on key position).
 - **Per-Application Sound Rules**: Set custom volume, switch profiles, or mute MekTok entirely when specific games or software are active.
