@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>MekTok</AssemblyName>
+    <RootNamespace>MekTok.App</RootNamespace>
+    <ApplicationIcon>Assets\mektok.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <Product>MekTok</Product>
+    <Description>Mechanical keyboard sound simulator for Windows</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MekTok.Core\MekTok.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\mektok.ico" />
+  </ItemGroup>
+
+</Project>

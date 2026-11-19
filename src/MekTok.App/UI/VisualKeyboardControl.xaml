@@ -1,0 +1,17 @@
+<UserControl x:Class="MekTok.App.UI.VisualKeyboardControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Border Background="{DynamicResource SurfaceSubtleBrush}"
+            BorderBrush="{DynamicResource BorderSubtleBrush}"
+            BorderThickness="1"
+            CornerRadius="12"
+            Padding="14">
+        <Viewbox Stretch="Uniform">
+            <Canvas x:Name="KeyCanvas"
+                    Width="1035"
+                    Height="290"
+                    ClipToBounds="False" />
+        </Viewbox>
+    </Border>
+</UserControl>
+
